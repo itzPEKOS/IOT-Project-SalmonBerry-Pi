@@ -15,6 +15,8 @@
     SPACE = สลับไฟเขียว / แดง (ไฟแดงมี grace period ก่อนเริ่มจับ)
     s     = เซฟภาพหน้าจอไว้ทำ qualitative evaluation (โฟลเดอร์ captures/)
     n     = (mediapipe) เปิด/ปิดเลขกำกับจุด 0–32
+    + / - = เพิ่ม/ลด threshold ระหว่างรัน (pose ทีละ 0.005, diff ทีละ 0.002)
+    ] / [ = เพิ่ม/ลด จำนวนเฟรมติดกันที่ต้องเกิน threshold
     q     = ออก (พิมพ์สรุป FPS / CPU / RAM และบันทึกต่อท้าย captures/benchmark.csv)
 """
 import argparse
@@ -178,9 +180,9 @@ def largest_person(r):
 
 
 # ---------------------------------------------------------------- scoring
-def pose_score(ref, cur, min_conf=0.5):
-    """ระยะที่ keypoint เลื่อนไปจากตอนเริ่มไฟแดง หารด้วยความสูงตัว (ไม่ขึ้นกับระยะห่างจากกล้อง)
-    คืน (คะแนนของส่วนที่ขยับมากที่สุด, ชื่อส่วนนั้น)"""
+def part_scores(ref, cur, min_conf=0.5):
+    """คะแนนแยกทีละส่วนของร่างกาย: ระยะที่ keypoint เลื่อนไปจากตอนเริ่มไฟแดง หารด้วยความสูงตัว
+    (ไม่ขึ้นกับระยะห่างจากกล้อง) ส่วนที่มองไม่เห็นจะไม่อยู่ใน dict"""
     (xy0, c0, h0), (xy1, c1, h1) = ref, cur
     h = max((h0 + h1) / 2, 1.0)
     ok = (c0 > min_conf) & (c1 > min_conf)
@@ -190,6 +192,12 @@ def pose_score(ref, cur, min_conf=0.5):
         idx = [k for k in idx if ok[k]]
         if idx:
             parts[name] = float(d[idx].mean())
+    return parts
+
+
+def pose_score(ref, cur, min_conf=0.5):
+    """คืน (คะแนนของส่วนที่ขยับมากที่สุด, ชื่อส่วนนั้น)"""
+    parts = part_scores(ref, cur, min_conf)
     if not parts:
         return None, None
     worst = max(parts, key=parts.get)
@@ -212,6 +220,26 @@ def diff_score(ref, cur):
 def put(img, text, y, color=(255, 255, 255), scale=0.6):
     cv2.putText(img, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 4, cv2.LINE_AA)
     cv2.putText(img, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2, cv2.LINE_AA)
+
+
+def draw_part_panel(img, parts, thr):
+    """แถบคะแนนแยกตามส่วนของร่างกาย มุมขวาบน: แดง = เกิน thr"""
+    x0, y0, bar_w = img.shape[1] - 230, 20, 120
+    full = max(thr * 2, 1e-6)  # ความยาวเต็มแถบ = 2 เท่าของ thr
+    for i, name in enumerate(PARTS):
+        y = y0 + i * 22
+        cv2.putText(img, name, (x0, y + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+        bx = x0 + 80
+        cv2.rectangle(img, (bx, y), (bx + bar_w, y + 14), (80, 80, 80), 1)
+        cv2.line(img, (bx + bar_w // 2, y - 2), (bx + bar_w // 2, y + 16), (200, 200, 200), 1)  # เส้น thr
+        v = parts.get(name)
+        if v is None:
+            cv2.putText(img, "-", (bx + 4, y + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
+            continue
+        w = int(min(v / full, 1.0) * bar_w)
+        color = (0, 0, 255) if v > thr else (0, 200, 0)
+        cv2.rectangle(img, (bx, y + 1), (bx + w, y + 13), color, -1)
+        cv2.putText(img, f"{v:.3f}", (bx + bar_w + 6, y + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
 
 
 def save_benchmark(row):
@@ -311,6 +339,8 @@ def main():
 
         if mask is not None:
             vis[mask > 0] = (0.5 * vis[mask > 0] + [0, 0, 127]).astype(np.uint8)
+        if uses_pose and state in ("RED", "CAUGHT") and ref is not None and cur is not None:
+            draw_part_panel(vis, part_scores(ref, cur), thr)  # หลังโดนจับยังแสดงต่อ ไว้ดูว่าขยับแค่ไหน
 
         # --- FPS (ทั้ง loop รวมอ่านกล้อง) + resource ---
         t = time.perf_counter()
@@ -331,6 +361,7 @@ def main():
                 put(vis, f"score {score:.3f} / thr {thr}" + (f"  [{part}]" if part else ""), 80)
         if state == "CAUGHT":
             put(vis, result, 80, (0, 0, 255))
+        put(vis, f"thr {thr}  frames {args.frames}   (+/- thr, [/] frames)", vis.shape[0] - 40, scale=0.5)
         put(vis, "SPACE: green/red   s: save   n: point ids   q: quit", vis.shape[0] - 15, scale=0.5)
 
         cv2.imshow("RLGL motion test", vis)
@@ -342,6 +373,18 @@ def main():
                 state, t_red = "GRACE", now
             else:
                 state, result = "GREEN", ""
+        if key in (ord("+"), ord("=")):           # ปรับ threshold ระหว่างรัน
+            thr = round(thr + (0.005 if uses_pose else 0.002), 3)
+            print("thr =", thr)
+        if key in (ord("-"), ord("_")):
+            thr = max(round(thr - (0.005 if uses_pose else 0.002), 3), 0.001)
+            print("thr =", thr)
+        if key == ord("]"):                        # ปรับจำนวนเฟรมติดกันที่ต้องเกิน thr
+            args.frames += 1
+            print("frames =", args.frames)
+        if key == ord("[") and args.frames > 1:
+            args.frames -= 1
+            print("frames =", args.frames)
         if key == ord("n"):
             show_ids = not show_ids
         if key == ord("s"):
@@ -375,6 +418,7 @@ def main():
     print("\n=== summary ===")
     for k, v in row.items():
         print(f"{k:>18}: {v}")
+    print(f"{'final thr':>18}: {thr}  (frames {args.frames})")
     save_benchmark(row)
 
 
