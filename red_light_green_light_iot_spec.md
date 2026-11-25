@@ -2,7 +2,7 @@
 
 > **Context for AI / Developer:** เอกสารนี้คือสเปกของโปรเจกต์วิชา **2110575 IoT Systems and Digital Solutions** ใช้เป็นบริบทหลักสำหรับการออกแบบสถาปัตยกรรมระบบ (MQTT Topics, Database Schema, API) และการเขียนโค้ดต่อไป
 
-> **อัปเดต 25 พ.ย. 2026:** ย้าย Ultrasonic จาก ESP2 ไปต่อที่ Raspberry Pi / ไม่ใช้ไมค์ในระบบ / Dashboard เป็นเว็บของทีมเอง และฝังกราฟจาก Grafana
+> **อัปเดต 25 พ.ย. 2026:** ย้าย Ultrasonic จาก ESP2 ไปต่อที่ Raspberry Pi / ไม่ใช้ไมค์ในระบบ / Dashboard เป็นเว็บของทีมเอง และฝังกราฟจาก Grafana / MQTT ใช้ Bridge ผ่าน Pi ไปยัง Broker หลักบนคอมพิวเตอร์ (รายละเอียดใน `ARCHITECTURE.md`)
 
 ---
 
@@ -26,10 +26,11 @@
    * **Camera Module / Video Stream:** ถ่ายภาพผู้เล่น รัน AI Model ตรวจจับการขยับ (Keypoint/Motion Detection) และคำนวณค่า FPS
    * **Ultrasonic Sensor (HC-SR04):** วัดระยะห่างของผู้เล่นเทียบกับเส้นชัย *(ขา Echo เป็น 5V ต้องผ่าน Voltage Divider เช่น 1kΩ/2kΩ ก่อนเข้า GPIO 3.3V)*
    * **Touch Module (เส้นชัย):** ต่อกับขา GPIO ของ Pi ใช้ตัดสินการชนะ
+   * **Mosquitto (Bridge):** ESP1/ESP2 ต่อ MQTT เข้าที่ Pi แล้ว Pi ส่งต่อ topic `rlgl/#` ไปยัง Broker หลักบนคอมพิวเตอร์ทั้งสองทาง *(แผนสำรอง: ESP ต่อคอมพิวเตอร์ตรง)*
 
 4. **Computer (On-Premise Server)**
    * รัน **Game Engine** (คุม State Machine ทั้งหมด)
-   * รัน **MQTT Broker** (รองรับอย่างน้อย 3 Topics แยกตามแหล่งข้อมูล)
+   * รัน **MQTT Broker หลัก** (รองรับอย่างน้อย 3 Topics แยกตามแหล่งข้อมูล) รับข้อมูลจาก Pi ผ่าน Bridge
    * รัน **Time-Series Database** (InfluxDB) สำหรับเก็บข้อมูลเซนเซอร์ย้อนหลัง
    * รัน **Web Dashboard** ของทีมเอง (หน้าเกม, วิดีโอ, ปุ่มควบคุม) และ **Grafana** สำหรับกราฟ Real-time/Historical ที่ฝังเข้าหน้าเว็บด้วย iframe
    * เชื่อมต่อ **AI Service (Cloud API)** (เช่น Gemini API / OpenAI API / TTS) สำหรับสร้างคำพากย์/บทวิเคราะห์หลังจบเกม

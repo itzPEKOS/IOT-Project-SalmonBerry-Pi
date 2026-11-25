@@ -1,0 +1,4 @@
+time,machine,method,frames,avg_fps,infer_ms_mean,infer_ms_p95,cpu_mean_pct,ram_after_load_mb,ram_peak_mb,gpu_mb
+2026-11-25 15:18:29,MSI (AMD64),mediapipe-lite,1675,30.04,13.8,21.02,3.7,133,189,
+2026-11-25 15:18:49,MSI (AMD64),mediapipe-lite,308,28.11,8.72,9.69,2.1,132,189,
+2026-11-25 15:22:04,MSI (AMD64),mediapipe-lite,4049,30.33,8.5,9.36,2.3,133,194,
