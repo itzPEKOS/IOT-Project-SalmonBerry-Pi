@@ -1,0 +1,82 @@
+# ฝั่ง laptop: InfluxDB, Telegraf, Grafana และตัวจำลอง
+
+```
+อุปกรณ์หรือตัวจำลอง ──MQTT──► broker ──► Telegraf ──► InfluxDB ──► Grafana
+```
+
+## สิ่งที่ต้องมี
+
+- Docker Desktop (เปิดไว้)
+- Python 3.10 ขึ้นไป และ `pip install "paho-mqtt>=2"` สำหรับตัวจำลอง
+
+## เริ่มใช้งาน
+
+```powershell
+cd laptop/infra
+```
+
+```powershell
+python make_env.py
+```
+
+```powershell
+docker compose up -d
+```
+
+ครั้งแรก Docker จะดาวน์โหลด image `influxdb:2.7`, `telegraf:1.35`, `grafana/grafana:11.6.0` และ `eclipse-mosquitto:2`
+
+```powershell
+python ../sim/simulate.py --rounds 3 --fake-backend
+```
+
+เปิด Grafana ที่ http://localhost:3000 บัญชีผู้ดูแลอยู่ใน `laptop/infra/.env`
+
+`--fake-backend` ให้ตัวจำลองส่ง `rlgl/game/summary` แทน ใช้**เฉพาะตอนไม่ได้เปิด backend** ถ้าเปิด backend แล้ว (ดู [`web/README.md`](web/README.md)) ให้ใช้ `--backend http://127.0.0.1:8000` แทน
+
+## ตั้งค่า (`infra/.env`)
+
+| ค่า | ใช้ทำอะไร |
+|---|---|
+| `MQTT_URL` | ที่อยู่ broker ที่ Telegraf จะ subscribe |
+| `COMPOSE_PROFILES=devbroker` | เปิด broker บน laptop ถ้าใช้ broker บน Pi อย่างเดียว ให้ลบบรรทัดนี้ แล้วตั้ง `MQTT_URL=tcp://<IP ของ Pi>:1883` |
+| `MQTT_USER`, `MQTT_PASSWORD` | ต้องตรงกับ broker ที่ต่อ |
+| `BIND_IP` | `127.0.0.1` = ใช้ได้เฉพาะเครื่องนี้ เปลี่ยนเป็น `0.0.0.0` เมื่อต้องให้ Pi หรือ ESP32 ต่อเข้ามา |
+
+ห้าม commit ไฟล์ `.env` (repo นี้เป็น public)
+
+## แก้ dashboard
+
+แก้ `infra/grafana/make_dashboard.py` แล้วรันใหม่ ไฟล์ `dashboards/rlgl.json` ถูกสร้างจากสคริปต์นี้
+เส้นเกณฑ์ในกราฟ (0.3 g และ 0.05) เป็นค่าตัวอย่าง ต้องปรับตามผล calibrate
+
+## ชื่อ topic และ field
+
+ดู [`docs/mqtt-contract.md`](../docs/mqtt-contract.md) เป็น**ฉบับร่าง** ที่ทีมยังต้องยืนยัน
+บางข้อยังไม่ตรงกับ `ARCHITECTURE.md` ที่ root เช่น เรื่อง LED และตำแหน่ง game engine
+
+## สถานะ
+
+- ทดสอบด้วย**ข้อมูลจำลอง**บน Windows + Docker Desktop (25 พ.ย. 2026):
+  - จำนวนข้อความ imu, distance, vision, camera, state, result ใน InfluxDB ตรงกับที่ส่ง
+  - ชีพจรนอกช่วง 45-180 ไม่ถูกบันทึก
+  - query ของ panel ทั้ง 15 ได้ข้อมูล และ dashboard แสดงผลสดได้
+  - ดู dashboard ได้โดยไม่ล็อกอิน แต่แก้ไขไม่ได้
+- **ยังไม่ได้ทดสอบ:** ข้อมูลจาก ESP32 และ Pi จริง, การต่อจากเครื่องอื่นในวง LAN, broker บน Pi หรือ bridge, ความเร็ว query เมื่อข้อมูลสะสมมาก
+- ตาราง "คลิปวิดีโอ" ทดสอบด้วยข้อความตัวอย่าง ยังไม่มีไฟล์วิดีโอจริง
+- `rlgl/game/summary` ในการทดสอบ ตัวจำลองส่งแทน backend
+
+## เว็บเกม
+
+backend และพื้นที่ของ frontend อยู่ใน [`web/`](web/README.md)
+
+## หยุดและเริ่มใหม่
+
+```powershell
+docker compose stop
+```
+
+```powershell
+docker compose start
+```
+
+ข้อมูลเก็บใน Docker volume คำสั่ง `docker compose down -v` จะ**ลบข้อมูลทั้งหมด**
