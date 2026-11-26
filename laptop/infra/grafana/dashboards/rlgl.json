@@ -1,0 +1,800 @@
+{
+  "uid": "rlgl-main",
+  "title": "Red Light / Green Light",
+  "timezone": "browser",
+  "schemaVersion": 40,
+  "refresh": "1s",
+  "time": {
+    "from": "now-5m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "1s",
+      "5s",
+      "10s",
+      "30s",
+      "1m"
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "สด: เกมและผู้เล่น",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "สถานะเกม",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 8,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"game_state\" and r._field == \"state\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "--",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "IDLE": {
+                  "color": "#808080",
+                  "text": "IDLE"
+                },
+                "CALIBRATE": {
+                  "color": "#808080",
+                  "text": "CALIBRATE"
+                },
+                "GREEN_LIGHT": {
+                  "color": "green",
+                  "text": "GREEN_LIGHT"
+                },
+                "TRANSITION": {
+                  "color": "red",
+                  "text": "TRANSITION"
+                },
+                "RED_LIGHT": {
+                  "color": "red",
+                  "text": "RED_LIGHT"
+                },
+                "GAME_OVER": {
+                  "color": "dark-red",
+                  "text": "GAME_OVER"
+                },
+                "WIN": {
+                  "color": "blue",
+                  "text": "WIN"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "เวลาที่เหลือ",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"game_state\" and r._field == \"remaining_s\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "--",
+          "unit": "suffix: s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "ชีพจร (BPM)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and r._field == \"bpm\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 120
+              },
+              {
+                "color": "red",
+                "value": 150
+              }
+            ]
+          },
+          "noValue": "--"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "ระยะผู้เล่น",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"distance\" and r._field == \"distance_cm\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "--",
+          "unit": "suffix: cm"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "FPS กล้อง",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and r._field == \"fps\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "--"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "ชีพจร",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and r._field == \"bpm\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "BPM",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "insertNulls": 5000,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "ระยะผู้เล่น",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"distance\" and r._field == \"distance_cm\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "cm",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "insertNulls": 5000,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "ข้อมือ: acc_peak (เส้นเกณฑ์ตัวอย่าง 0.3 g)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"imu\" and r._field == \"acc_peak\")\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "acc_peak (g)",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "insertNulls": 5000,
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "ข้อมือ: gyro_rms",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"imu\" and r._field == \"gyro_rms\")\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "gyro_rms (deg/s)",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "insertNulls": 5000,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "กล้อง: motion_score (เส้นเกณฑ์ตัวอย่าง 0.05)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and r._field == \"motion_score\")\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "motion_score",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "insertNulls": 5000,
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "กล้อง: FPS",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and r._field == \"fps\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "fps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "insertNulls": 5000,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "ประวัติ (ตารางย้อนหลัง 7 วัน)",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 14,
+      "type": "table",
+      "title": "ผลแต่ละรอบ",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"game_result\")\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()\n  |> keep(columns: [\"_time\", \"round_id\", \"result\", \"reason\", \"duration_s\"])\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 50)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "_time": 0,
+              "result": 1,
+              "reason": 2,
+              "duration_s": 3,
+              "round_id": 4
+            }
+          }
+        }
+      ],
+      "timeFrom": "7d"
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "สรุปของรอบ",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 27,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"game_summary\")\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()\n  |> keep(columns: [\"_time\", \"round_id\", \"bpm_avg\", \"bpm_max\", \"red_motion_max\", \"red_acc_peak_max\", \"red_light_count\"])\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 50)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "_time": 0,
+              "bpm_avg": 1,
+              "bpm_max": 2,
+              "red_motion_max": 3,
+              "red_acc_peak_max": 4,
+              "red_light_count": 5,
+              "round_id": 6
+            }
+          }
+        }
+      ],
+      "timeFrom": "7d"
+    },
+    {
+      "id": 16,
+      "type": "table",
+      "title": "คลิปวิดีโอ",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"media\")\n  |> keep(columns: [\"_time\", \"_field\", \"_value\"])\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()\n  |> keep(columns: [\"_time\", \"round_id\", \"status\", \"video_url\"])\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 50)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "video_url"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "เปิดวิดีโอ",
+                    "url": "${__value.raw}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "_time": 0,
+              "round_id": 1,
+              "status": 2,
+              "video_url": 3
+            }
+          }
+        }
+      ],
+      "timeFrom": "7d"
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "สถานะอุปกรณ์",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_status\" and r._field == \"status\")\n  |> group(columns: [\"device_id\"])\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> group()\n  |> keep(columns: [\"device_id\", \"_value\", \"_time\"])\n  |> rename(columns: {_value: \"status\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "device_id": 0,
+              "status": 1,
+              "_time": 2
+            }
+          }
+        }
+      ],
+      "timeFrom": "7d"
+    }
+  ]
+}
