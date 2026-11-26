@@ -20,17 +20,28 @@ pi_client.py: งานฝั่ง Pi (gateway) สำหรับโหมด 
                          QoS 1  event="moved" ตอนจับได้ครั้งแรกของรอบ / event="calibrated" ตอน calibrate เสร็จ
                          QoS 0  นอกไฟแดงส่งสรุป fps ทุก 1 วินาที (event="heartbeat")
     rlgl/status/pi       QoS 1 retain  online / offline (offline ส่งโดย broker อัตโนมัติถ้าหลุด = LWT)
+    rlgl/gateway/replay  QoS 1  คลิปรีเพลย์ของรอบอัปโหลดเสร็จแล้ว: url, page, moved_at, result, cause
 รับ:
     rlgl/game/state      {"state": "CALIBRATE" | "GREEN_LIGHT" | "TRANSITION" | "RED_LIGHT" | "WIN" | "GAME_OVER" | "IDLE", "round_id": 7}
                          Game Engine ต้องส่ง RED_LIGHT หลังหมดช่วงผ่อนผันแล้ว (Pi เริ่มเก็บท่าตั้งต้นทันทีที่ได้รับ)
+    rlgl/game/result     {"result": "GAME_OVER" | "WIN", "cause": "camera" | "wrist" | ..., "round_id": 7}
+
+คลิปรีเพลย์ (HTTP):
+    Pi เก็บภาพ (ที่วาดโครงร่างแล้ว) ย้อนหลัง ~12 วินาทีไว้ในหน่วยความจำตลอด
+    พอจับได้ว่าขยับ หรือได้รับ GAME_OVER / WIN → เก็บต่ออีก --post วินาที แล้วตัดคลิป --pre วินาทีก่อน + --post วินาทีหลัง
+    ได้ 2 ไฟล์ใน captures/replays/: วิดีโอ (H.264 .mp4 ถ้ามี ffmpeg, ไม่มีก็ .webm) + .json ข้อมูลรายเฟรม (moved_at = วินาทีที่ขยับในคลิป)
+    แล้ว POST ไปที่ replay_server.py บน laptop (--replay-url) และแจ้ง rlgl/gateway/replay
 """
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import threading
 import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import cv2
 import numpy as np
@@ -86,7 +97,7 @@ class Link:
 
     def __init__(self, args):
         self.dev, self.seq, self.round_id = args.device_id, 0, None
-        self.latest_state, self.lock = None, threading.Lock()
+        self.latest_state, self.latest_result, self.lock = None, None, threading.Lock()
         self.connected, self.cli = False, None
         if args.sim or mqtt is None:
             if mqtt is None and not args.sim:
@@ -114,7 +125,7 @@ class Link:
 
     def _on_connect(self, c, *args):
         self.connected = True
-        c.subscribe("rlgl/game/state", qos=1)
+        c.subscribe([("rlgl/game/state", 1), ("rlgl/game/result", 1)])
         c.publish(self.status_topic, self._wrap({"status": "online"}), qos=1, retain=True)
         print("MQTT connected")
 
@@ -124,7 +135,15 @@ class Link:
         except ValueError:
             return
         with self.lock:
-            self.latest_state = data
+            if msg.topic == "rlgl/game/result":
+                self.latest_result = data
+            else:
+                self.latest_state = data
+
+    def take_result(self):
+        with self.lock:
+            r, self.latest_result = self.latest_result, None
+        return r
 
     def take_state(self):
         with self.lock:
@@ -149,6 +168,9 @@ class SimGame:
     def __init__(self, calib):
         self.t0, self.calib, self.last, self.rid = time.perf_counter(), calib, None, 1
 
+    def take_result(self):
+        return None
+
     def take_state(self):
         el = time.perf_counter() - self.t0
         if el < self.calib:
@@ -164,6 +186,120 @@ class SimGame:
             return None
         self.last = st
         return {"state": st, "round_id": self.rid}
+
+
+# ---------------------------------------------------------------- replay
+def write_video(jpgs, fps, base):
+    """เขียนคลิปที่เบราว์เซอร์เล่นได้: ffmpeg → H.264 .mp4 (ดีที่สุด), ไม่มี ffmpeg → OpenCV VP8 .webm
+    คืน (path, codec) หรือ (None, None)"""
+    ff = shutil.which("ffmpeg")
+    if ff:
+        cmd = [ff, "-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", f"{fps:.2f}", "-c:v", "mjpeg", "-i", "-",
+               "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+               "-pix_fmt", "yuv420p", "-movflags", "+faststart", base + ".mp4"]
+        try:
+            p = subprocess.run(cmd, input=b"".join(jpgs), capture_output=True, timeout=120)
+            if p.returncode == 0 and os.path.getsize(base + ".mp4") > 1000:
+                return base + ".mp4", "h264"
+            print("ffmpeg error:", p.stderr.decode(errors="ignore")[-300:])
+        except (OSError, subprocess.TimeoutExpired) as e:
+            print("ffmpeg failed:", e)
+    first = cv2.imdecode(np.frombuffer(jpgs[0], np.uint8), cv2.IMREAD_COLOR)
+    h, w = first.shape[:2]
+    for fourcc, ext in (("VP80", "webm"), ("avc1", "mp4"), ("mp4v", "mp4")):
+        path = f"{base}.{ext}"
+        vw = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
+        if not vw.isOpened():
+            continue
+        for j in jpgs:
+            vw.write(cv2.imdecode(np.frombuffer(j, np.uint8), cv2.IMREAD_COLOR))
+        vw.release()
+        if os.path.exists(path) and os.path.getsize(path) > 1000:
+            if fourcc == "mp4v":
+                print("คำเตือน: ได้คลิป mp4v ซึ่งเบราว์เซอร์มักเล่นไม่ได้ ติดตั้ง ffmpeg เพื่อให้ได้ H.264")
+            return path, fourcc.lower()
+    return None, None
+
+
+def upload(url, round_id, video_path, json_path):
+    """POST ไฟล์คลิป + json ไปที่ replay_server.py คืน dict ที่ server ตอบ"""
+    try:
+        import requests
+    except ImportError:
+        raise RuntimeError("ไม่มี requests (pip install requests)")
+    mime = "video/mp4" if video_path.endswith(".mp4") else "video/webm"
+    with open(video_path, "rb") as v, open(json_path, "rb") as m:
+        r = requests.post(url, data={"round_id": str(round_id)}, timeout=30,
+                          files={"video": (os.path.basename(video_path), v, mime),
+                                 "meta": (os.path.basename(json_path), m, "application/json")})
+    r.raise_for_status()
+    return r.json()
+
+
+class ReplayRecorder:
+    """เก็บเฟรมย้อนหลังในหน่วยความจำ แล้วตัดคลิปรอบละ 1 คลิปเมื่อมีเหตุการณ์ (ขยับ / GAME_OVER / WIN)"""
+
+    def __init__(self, args, link):
+        self.pre, self.post, self.url, self.link = args.pre, args.post, args.replay_url, link
+        self.buf = deque()
+        self.pending, self.done = None, set()
+        self.last = None
+        self.dir = os.path.join("captures", "replays")
+        os.makedirs(self.dir, exist_ok=True)
+
+    def add(self, t, jpg, meta):
+        self.buf.append((t, jpg, meta))
+        while self.buf and t - self.buf[0][0] > self.pre + self.post + 2:
+            self.buf.popleft()
+
+    def mark(self, t, round_id, info):
+        """จดเวลาเหตุการณ์ (ครั้งแรกของรอบเท่านั้น)"""
+        key = round_id if round_id is not None else "none"
+        if self.pending is not None or key in self.done:
+            return False
+        self.pending = {"t": t, "round_id": round_id, **info}
+        return True
+
+    def poll(self, t):
+        p = self.pending
+        if p is None or t < p["t"] + self.post:
+            return
+        self.pending = None
+        self.done.add(p["round_id"] if p["round_id"] is not None else "none")
+        frames = [f for f in self.buf if p["t"] - self.pre <= f[0] <= p["t"] + self.post]
+        if len(frames) >= 5:
+            threading.Thread(target=self._finalize, args=(p, frames), daemon=True).start()
+
+    def _finalize(self, p, frames):
+        t0, t1 = frames[0][0], frames[-1][0]
+        fps = (len(frames) - 1) / (t1 - t0) if t1 > t0 else 15.0
+        rid = p["round_id"] if p["round_id"] is not None else 0
+        base = os.path.join(self.dir, f"round_{rid:03d}_{time.strftime('%H%M%S')}")
+        video, codec = write_video([f[1] for f in frames], fps, base)
+        if not video:
+            print("ทำคลิปไม่สำเร็จ")
+            return
+        meta = {"round_id": p["round_id"], "result": p.get("result"), "cause": p.get("cause"), "part": p.get("part"),
+                "joint": p.get("joint"), "score": p.get("score"), "moved_at": round(p["t"] - t0, 3),
+                "duration": round(t1 - t0, 3), "fps": round(fps, 2), "video": os.path.basename(video), "codec": codec,
+                "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "frames": [{"t": round(f[0] - t0, 3), **f[2]} for f in frames]}
+        with open(base + ".json", "w", encoding="utf-8") as fp:
+            json.dump(meta, fp, ensure_ascii=False)
+        print(f"replay saved: {video} ({len(frames)} frames, {fps:.1f} fps, event at {meta['moved_at']} s)")
+        info = {"round_id": p["round_id"], "file": os.path.basename(video), "moved_at": meta["moved_at"],
+                "result": meta["result"], "cause": meta["cause"], "uploaded": False}
+        if self.url:
+            try:
+                res = upload(self.url, rid, video, base + ".json")
+                info.update(uploaded=True, url=urljoin(self.url, res.get("url", "")), page=urljoin(self.url, res.get("page", "")))
+                print("replay uploaded:", info["page"])
+            except Exception as e:
+                info["error"] = str(e)[:200]
+                print("อัปโหลดคลิปไม่สำเร็จ (ไฟล์ยังอยู่ใน captures/replays):", e)
+        if self.link is not None and info["uploaded"]:
+            self.link.publish("rlgl/gateway/replay", info, qos=1)
+        self.last = info
 
 
 # ---------------------------------------------------------------- overlay
@@ -216,6 +352,7 @@ class App:
         link = SimGame(a.calib) if a.sim else Link(a)
         mq = None if a.sim else link
         det = MotionDetector(DetectorConfig(k_sigma=a.k))
+        rec = None if a.no_replay else ReplayRecorder(a, mq)
         cam = Camera(a.source, a.width, a.height)
         pose = MediaPipePose(a.variant)
         state, rid, caught, r = None, None, None, None
@@ -257,6 +394,10 @@ class App:
                         caught = None
                     if new in ("GREEN_LIGHT", "CALIBRATE", "IDLE"):
                         caught = None
+                    if new in ("GAME_OVER", "WIN") and rec is not None:
+                        res = link.take_result() or msg
+                        rec.mark(now, rid, {"result": new, "cause": res.get("cause") or ("finish" if new == "WIN" else None),
+                                            "part": res.get("part"), "joint": res.get("joint"), "score": res.get("score")})
                     print(f"state: {state} → {new}  (round {rid})")
                     state = new
 
@@ -277,6 +418,9 @@ class App:
                                                        "fps": round(fps, 1), "infer_ms": round(infer_ms, 1)}, qos=0)
                 if r.triggered:
                     caught = {"part": r.part, "joint": r.joint, "score": r.score}
+                    if rec is not None:
+                        rec.mark(now, rid, {"result": "GAME_OVER", "cause": "camera", "part": r.part, "joint": r.joint,
+                                            "score": round(r.score, 3)})
                     print(f"  >>> MOVED: {r.part}/{r.joint} score={r.score:.2f}")
 
                 # ----- video
@@ -286,12 +430,16 @@ class App:
                 if r.triggered:
                     cv2.imwrite(os.path.join("captures", f"moved_r{rid}_{int(time.time())}.jpg"), vis)
                 ok, buf = cv2.imencode(".jpg", vis, [cv2.IMWRITE_JPEG_QUALITY, a.quality])
+                if ok and rec is not None:
+                    rec.add(now, buf.tobytes(), {"state": state, "score": None if r.score is None else round(r.score, 3),
+                                                  "part": r.part, "joint": r.joint, "moved": r.moved})
+                    rec.poll(now)
                 with self.lock:
                     if ok:
                         self.jpg, self.jseq = buf.tobytes(), self.jseq + 1
                     self.status = {"state": state, "round_id": rid, "fps": round(fps, 1), "infer_ms": round(infer_ms, 1),
                                    "mqtt": bool(mq and mq.connected), "sim": a.sim, "detector": r.to_dict(),
-                                   "caught": caught}
+                                   "caught": caught, "last_replay": rec.last if rec else None}
                     self.cond.notify_all()
         finally:
             cam.close()
@@ -377,7 +525,13 @@ def main():
     ap.add_argument("--quality", type=int, default=70)
     ap.add_argument("--sim", action="store_true", help="สลับไฟเองในเครื่อง ไม่ใช้ MQTT")
     ap.add_argument("--calib", type=float, default=5.0, help="(--sim) วินาทีที่ให้ยืนนิ่งตอนเริ่ม")
+    ap.add_argument("--replay-url", default=None, help="ที่อยู่ replay_server (ค่าเริ่มต้น http://<broker>:5000/api/replay)")
+    ap.add_argument("--pre", type=float, default=8.0, help="คลิป: วินาทีก่อนเหตุการณ์")
+    ap.add_argument("--post", type=float, default=2.0, help="คลิป: วินาทีหลังเหตุการณ์")
+    ap.add_argument("--no-replay", action="store_true", help="ไม่ต้องทำคลิป")
     args = ap.parse_args()
+    if args.replay_url is None and not args.sim:
+        args.replay_url = f"http://{args.broker}:5000/api/replay"
 
     app = App(args)
     server = None
