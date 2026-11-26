@@ -38,9 +38,9 @@ python ../sim/simulate.py --rounds 3 --fake-backend
 | ค่า | ใช้ทำอะไร |
 |---|---|
 | `MQTT_URL` | ที่อยู่ broker ที่ Telegraf จะ subscribe |
-| `COMPOSE_PROFILES=devbroker` | เปิด broker บน laptop ถ้าใช้ broker บน Pi อย่างเดียว ให้ลบบรรทัดนี้ แล้วตั้ง `MQTT_URL=tcp://<IP ของ Pi>:1883` |
+| `COMPOSE_PROFILES=devbroker` | เปิด broker ชั่วคราวบน laptop สำหรับพัฒนา **ตอนรวมระบบให้ลบบรรทัดนี้** แล้วตั้ง `MQTT_URL=tcp://<IP ของ Pi>:1883` (broker เดียวของระบบอยู่บน Pi) |
 | `MQTT_USER`, `MQTT_PASSWORD` | ต้องตรงกับ broker ที่ต่อ |
-| `BIND_IP` | `127.0.0.1` = ใช้ได้เฉพาะเครื่องนี้ เปลี่ยนเป็น `0.0.0.0` เมื่อต้องให้ Pi หรือ ESP32 ต่อเข้ามา |
+| `BIND_IP` | `127.0.0.1` = ใช้ได้เฉพาะเครื่องนี้ เปลี่ยนเป็น `0.0.0.0` เมื่อต้องให้เครื่องอื่นในวงเปิด Grafana ได้ (หรือเมื่อใช้ broker บน laptop ตามแผนสำรองและต้องให้ Pi/ESP32 ต่อเข้ามา) |
 
 ห้าม commit ไฟล์ `.env` (repo นี้เป็น public)
 
@@ -61,7 +61,7 @@ python ../sim/simulate.py --rounds 3 --fake-backend
   - ชีพจรนอกช่วง 45-180 ไม่ถูกบันทึก
   - query ของ panel ทั้ง 15 ได้ข้อมูล และ dashboard แสดงผลสดได้
   - ดู dashboard ได้โดยไม่ล็อกอิน แต่แก้ไขไม่ได้
-- **ยังไม่ได้ทดสอบ:** ข้อมูลจาก ESP32 และ Pi จริง, การต่อจากเครื่องอื่นในวง LAN, broker บน Pi หรือ bridge, ความเร็ว query เมื่อข้อมูลสะสมมาก
+- **ยังไม่ได้ทดสอบ:** ข้อมูลจาก ESP32 และ Pi จริง, การต่อจากเครื่องอื่นในวง LAN, broker บน Pi, ความเร็ว query เมื่อข้อมูลสะสมมาก
 - ตาราง "คลิปวิดีโอ" ทดสอบด้วยข้อความตัวอย่าง ยังไม่มีไฟล์วิดีโอจริง
 - `rlgl/game/summary` ในการทดสอบ ตัวจำลองส่งแทน backend
 
