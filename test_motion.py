@@ -9,14 +9,19 @@
     python test_motion.py --method mediapipe # MediaPipe Pose Landmarker (lite) โหลดโมเดลให้อัตโนมัติ
     python test_motion.py --method mediapipe --mp-variant full   # รุ่นที่แม่นกว่าแต่ช้ากว่า
     python test_motion.py --method diff      # Frame differencing (baseline ไว้เทียบใน evaluation)
-    python test_motion.py --thr 0.04         # ปรับความไวของการจับ
+    python test_motion.py --thr 0.04         # ปรับความไวของการจับ (ตัวเดิม / diff)
+    python test_motion.py --method mediapipe --detector old   # ตัวตรวจแบบเดิม (ค่าเริ่มต้นคือตัวใหม่ใน motion_detector.py)
+    python test_motion.py --method mediapipe --record --label still   # บันทึก keypoint ไว้ประเมินด้วย eval_motion.py
+
+ตัวใหม่ (pose/mediapipe): เริ่มโปรแกรมจะมีช่วง CALIB ให้ยืนนิ่ง --calib วินาที (กด c เพื่อทำใหม่)
 
 ปุ่ม:
     SPACE = สลับไฟเขียว / แดง (ไฟแดงมี grace period ก่อนเริ่มจับ)
     s     = เซฟภาพหน้าจอไว้ทำ qualitative evaluation (โฟลเดอร์ captures/)
     n     = (mediapipe) เปิด/ปิดเลขกำกับจุด 0–32
-    + / - = เพิ่ม/ลด threshold ระหว่างรัน (pose ทีละ 0.005, diff ทีละ 0.002)
-    ] / [ = เพิ่ม/ลด จำนวนเฟรมติดกันที่ต้องเกิน threshold
+    c     = (ตัวใหม่) calibrate ใหม่: ยืนนิ่ง --calib วินาที
+    + / - = เพิ่ม/ลด threshold ระหว่างรัน (ตัวใหม่ k ทีละ 0.25, ตัวเดิม ทีละ 0.005, diff ทีละ 0.002)
+    ] / [ = (ตัวเดิม / diff) เพิ่ม/ลด จำนวนเฟรมติดกันที่ต้องเกิน threshold
     q     = ออก (พิมพ์สรุป FPS / CPU / RAM และบันทึกต่อท้าย captures/benchmark.csv)
 """
 import argparse
@@ -27,6 +32,8 @@ import time
 
 import cv2
 import numpy as np
+
+from motion_detector import DetectorConfig, MotionDetector, OldDetector
 
 # COCO 17 keypoints -> แบ่งเป็นส่วนของร่างกาย เพื่อบอกได้ว่าขยับส่วนไหน
 PARTS = {
@@ -264,9 +271,27 @@ def main():
     ap.add_argument("--thr", type=float, default=None, help="default: pose/mediapipe 0.05, diff 0.02")
     ap.add_argument("--frames", type=int, default=3, help="ต้องเกิน thr ติดกันกี่เฟรมถึงนับว่าขยับ")
     ap.add_argument("--grace", type=float, default=0.7, help="วินาทีหลังไฟแดงที่ยังไม่จับ")
+    ap.add_argument("--detector", choices=["new", "old"], default="new", help="ตัวตรวจสำหรับ pose/mediapipe")
+    ap.add_argument("--k", type=float, default=4.5, help="ตัวใหม่: ความไว ยิ่งต่ำยิ่งไว")
+    ap.add_argument("--calib", type=float, default=5.0, help="ตัวใหม่: วินาทีที่ยืนนิ่งตอนเริ่ม (0 = ข้าม)")
+    ap.add_argument("--record", action="store_true", help="บันทึก keypoint ทุกเฟรมลง captures/rec_*.npz")
+    ap.add_argument("--label", default="", help="still / moved / still,moved (สลับทีละรอบ)")
     args = ap.parse_args()
     thr = args.thr if args.thr is not None else (0.02 if args.method == "diff" else 0.05)
     uses_pose = args.method != "diff"
+    det = None
+    if uses_pose:
+        det = (OldDetector(thr=thr, frames=args.frames) if args.detector == "old"
+               else MotionDetector(DetectorConfig(k_sigma=args.k)))
+    new_det = isinstance(det, MotionDetector)
+    labels = [x.strip() for x in args.label.split(",") if x.strip()] or [""]
+    rec = None
+    if args.record and uses_pose:
+        from eval_motion import PoseRecorder
+        rec = PoseRecorder(os.path.join("captures", f"rec_{time.strftime('%Y%m%d_%H%M%S')}_"
+                                        f"{args.label.replace(',', '-') or 'nolabel'}.npz"),
+                           {"source": f"webcam{args.cam}", "method": args.method, "labels": labels})
+    n_round = 0
 
     model, mp_pose = None, None
     if args.method == "pose":
@@ -278,6 +303,8 @@ def main():
         name = f"mediapipe-{args.mp_variant}"
     else:
         name = "frame-diff"
+    if uses_pose:
+        name += f"+{args.detector}"
 
     mon = ResourceMonitor(use_torch=model is not None)
     ram_after_load = mon.ram
@@ -291,6 +318,11 @@ def main():
 
     os.makedirs("captures", exist_ok=True)
     state, t_red, ref, streak = "GREEN", 0.0, None, 0
+    t_calib = None
+    if new_det and args.calib > 0:
+        state, t_calib = "CALIB", time.time()
+        det.start_calibration()
+        print(f"CALIBRATE: ยืนนิ่ง {args.calib:.0f} วินาที")
     result, fps, infer_ms = "", 0.0, 0.0
     infer_list, n_frames, t_start = [], 0, time.perf_counter()
     show_ids = False
@@ -324,22 +356,38 @@ def main():
         # --- state machine แบบย่อ ---
         now = time.time()
         score, part = None, None
+        if state == "CALIB" and now - t_calib >= args.calib:
+            info = det.finish_calibration()
+            print(f"calibrate: {info.get('frames')} เฟรม, noise x{info.get('noise_factor')}"
+                  + (f"  ** {info['msg']}" if info.get("msg") else ""))
+            state = "GREEN"
         if state == "GRACE" and now - t_red >= args.grace and cur is not None:
             ref, state, streak = cur, "RED", 0
+            if det is not None:
+                det.start_red()
+        r = det.update(time.perf_counter(), cur) if det is not None else None
+        if rec is not None:
+            ph = {"CAUGHT": "RED"}.get(state, state)
+            rec.add(time.perf_counter(), ph, n_round, labels[n_round % len(labels)] if ph == "RED" else "", cur)
+        if state in ("RED", "CAUGHT") and r is not None:
+            score, part = r.score, r.part
+            if r.triggered:
+                state = "CAUGHT"
+                result = f"MOVED: {r.part}/{r.joint}  score={r.score:.2f}"
+                print(result)
         elif state == "RED" and cur is not None:
-            if uses_pose:
-                score, part = pose_score(ref, cur)
-            else:
-                score, mask = diff_score(ref, cur)
+            score, mask = diff_score(ref, cur)
             streak = streak + 1 if (score is not None and score > thr) else 0
             if streak >= args.frames:
                 state = "CAUGHT"
-                result = f"MOVED: {part}  score={score:.3f}" if part else f"MOVED  score={score:.3f}"
+                result = f"MOVED  score={score:.3f}"
                 print(result)
 
         if mask is not None:
             vis[mask > 0] = (0.5 * vis[mask > 0] + [0, 0, 127]).astype(np.uint8)
-        if uses_pose and state in ("RED", "CAUGHT") and ref is not None and cur is not None:
+        if new_det and state in ("RED", "CAUGHT") and det.mode == "judge":
+            draw_part_panel(vis, det.last_parts, 1.0)           # คะแนนเทียบเกณฑ์ (1.0 = เกณฑ์)
+        elif uses_pose and state in ("RED", "CAUGHT") and ref is not None and cur is not None:
             draw_part_panel(vis, part_scores(ref, cur), thr)  # หลังโดนจับยังแสดงต่อ ไว้ดูว่าขยับแค่ไหน
 
         # --- FPS (ทั้ง loop รวมอ่านกล้อง) + resource ---
@@ -351,39 +399,75 @@ def main():
         mon.update()
 
         # --- overlay ---
-        colors = {"GREEN": (0, 220, 0), "GRACE": (0, 200, 255), "RED": (0, 0, 255), "CAUGHT": (0, 0, 255)}
+        colors = {"GREEN": (0, 220, 0), "GRACE": (0, 200, 255), "RED": (0, 0, 255), "CAUGHT": (0, 0, 255),
+                  "CALIB": (255, 200, 0)}
         put(vis, f"{state}   {name}   FPS {fps:4.1f}   infer {infer_ms:5.1f} ms", 28, colors[state])
         put(vis, mon.text(), 54, (220, 220, 220))
+        if state == "CALIB":
+            put(vis, f"CALIBRATE: stand still  {max(args.calib - (now - t_calib), 0):.1f}s", 80, (255, 200, 0))
         if state == "RED":
-            if cur is None or (uses_pose and score is None):
+            if new_det and det.mode == "ref":
+                put(vis, "building reference pose...", 80, (0, 200, 255))
+            elif cur is None or (uses_pose and score is None):
                 put(vis, "no player detected", 80, (0, 200, 255))
+            elif new_det:
+                put(vis, f"score {score:.2f} / 1.00  k={det.cfg.k_sigma}" + (f"  [{part}]" if part else ""), 80)
             else:
                 put(vis, f"score {score:.3f} / thr {thr}" + (f"  [{part}]" if part else ""), 80)
         if state == "CAUGHT":
             put(vis, result, 80, (0, 0, 255))
-        put(vis, f"thr {thr}  frames {args.frames}   (+/- thr, [/] frames)", vis.shape[0] - 40, scale=0.5)
+        if new_det:
+            put(vis, f"k {det.cfg.k_sigma}   (+/- k)   c: calibrate", vis.shape[0] - 40, scale=0.5)
+        else:
+            put(vis, f"thr {thr}  frames {args.frames}   (+/- thr, [/] frames)", vis.shape[0] - 40, scale=0.5)
         put(vis, "SPACE: green/red   s: save   n: point ids   q: quit", vis.shape[0] - 15, scale=0.5)
 
         cv2.imshow("RLGL motion test", vis)
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
-        if key == ord(" "):
+        if key == ord(" ") and state != "CALIB":
             if state == "GREEN":
                 state, t_red = "GRACE", now
             else:
+                if state in ("RED", "CAUGHT"):
+                    n_round += 1
                 state, result = "GREEN", ""
+                if det is not None:
+                    det.stop()
+        if key == ord("c") and new_det and state in ("GREEN", "CALIB"):
+            state, t_calib = "CALIB", now
+            det.start_calibration()
+            print(f"CALIBRATE: ยืนนิ่ง {args.calib:.0f} วินาที")
         if key in (ord("+"), ord("=")):           # ปรับ threshold ระหว่างรัน
-            thr = round(thr + (0.005 if uses_pose else 0.002), 3)
-            print("thr =", thr)
+            if new_det:
+                det.cfg.k_sigma = round(det.cfg.k_sigma + 0.25, 2)
+                det._qcache.clear()
+                print("k =", det.cfg.k_sigma)
+            else:
+                thr = round(thr + (0.005 if uses_pose else 0.002), 3)
+                if det is not None:
+                    det.thr = thr
+                print("thr =", thr)
         if key in (ord("-"), ord("_")):
-            thr = max(round(thr - (0.005 if uses_pose else 0.002), 3), 0.001)
-            print("thr =", thr)
+            if new_det:
+                det.cfg.k_sigma = max(round(det.cfg.k_sigma - 0.25, 2), 1.0)
+                det._qcache.clear()
+                print("k =", det.cfg.k_sigma)
+            else:
+                thr = max(round(thr - (0.005 if uses_pose else 0.002), 3), 0.001)
+                if det is not None:
+                    det.thr = thr
+                print("thr =", thr)
         if key == ord("]"):                        # ปรับจำนวนเฟรมติดกันที่ต้องเกิน thr
             args.frames += 1
+            if det is not None and not new_det:
+                det.frames = args.frames
             print("frames =", args.frames)
         if key == ord("[") and args.frames > 1:
             args.frames -= 1
+            if det is not None and not new_det:
+                det.frames = args.frames
             print("frames =", args.frames)
         if key == ord("n"):
             show_ids = not show_ids
@@ -394,6 +478,8 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+    if rec is not None and rec.save():
+        print("saved", rec.path, "-> ประเมินด้วย: python eval_motion.py", rec.path)
     if mp_pose is not None:
         mp_pose.landmarker.close()  # ปิดเองก่อนจบโปรแกรม ไม่งั้นจะมี error ตอน Python ปิดตัว
 
@@ -418,7 +504,10 @@ def main():
     print("\n=== summary ===")
     for k, v in row.items():
         print(f"{k:>18}: {v}")
-    print(f"{'final thr':>18}: {thr}  (frames {args.frames})")
+    if new_det:
+        print(f"{'final k':>18}: {det.cfg.k_sigma}")
+    else:
+        print(f"{'final thr':>18}: {thr}  (frames {args.frames})")
     save_benchmark(row)
 
 
