@@ -14,15 +14,16 @@ python -m http.server 8000
 
 ## สิ่งที่ต้องตั้งค่าก่อนใช้งานจริง
 
-1. **เปิด WebSocket ที่ Mosquitto บนโน้ตบุ๊ก** (เบราว์เซอร์ต่อ MQTT ตรงๆ ไม่ได้ ต้องผ่าน WebSocket) เพิ่มใน `mosquitto.conf` แล้วรีสตาร์ต และเปิด port 9001 ใน Firewall:
+1. **เปิด WebSocket ที่ Mosquitto บน Pi** (เบราว์เซอร์ต่อ MQTT ตรงๆ ไม่ได้ ต้องผ่าน WebSocket) เพิ่มใน `/etc/mosquitto/conf.d/rlgl.conf` แล้ว `sudo systemctl restart mosquitto` (ถ้ามี firewall บน Pi ให้เปิด port 9001 ด้วย):
    ```
    listener 1883 0.0.0.0
    protocol mqtt
-   listener 9001
-   protocol websockets
    allow_anonymous true
+
+   listener 9001 0.0.0.0
+   protocol websockets
    ```
-2. แก้ `config.js`: IP ของ Pi (`PI_VIDEO_URL`, `PI_CAPTURES_URL`), ที่อยู่ Grafana, `UID` / `SLUG` ของ dashboard และ `panelId` ของแต่ละ panel
+2. แก้ `config.js`: `PI_HOST` (IP ของ Pi ใช้ทั้ง broker, `PI_VIDEO_URL` และ `PI_CAPTURES_URL`), ที่อยู่ Grafana, `UID` / `SLUG` ของ dashboard และ `panelId` ของแต่ละ panel
 3. ตั้ง `grafana.ini` ตาม spec หัวข้อ 3 (`allow_embedding`, anonymous viewer, `min_refresh_interval = 1s`)
 
 ## Component ↔ แหล่งข้อมูล
@@ -44,7 +45,7 @@ python -m http.server 8000
 
 ## MQTT Topics ที่เว็บใช้ (ข้อเสนอ ปรับได้ที่ `config.js`)
 
-ทุก topic อยู่ใต้ `rlgl/` เพื่อให้ Mosquitto bridge ส่งต่อได้ (`topic rlgl/# both 0`)
+ทุก topic อยู่ใต้ `rlgl/` ตามข้อตกลงของทีม (ไม่ต้องมี bridge แล้ว แต่ยังใช้ prefix เดิมเพื่อให้ย้าย broker หรือกรอง topic ได้ง่าย)
 
 | Topic | ทิศทาง | Retained | Payload |
 | :--- | :--- | :--- | :--- |

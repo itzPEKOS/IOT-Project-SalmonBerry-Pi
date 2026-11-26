@@ -2,7 +2,7 @@
 
 > **Context for AI / Developer:** เอกสารนี้คือสเปกของโปรเจกต์วิชา **2110575 IoT Systems and Digital Solutions** ใช้เป็นบริบทหลักสำหรับการออกแบบสถาปัตยกรรมระบบ (MQTT Topics, Database Schema, API) และการเขียนโค้ดต่อไป
 
-> **อัปเดต 25 พ.ย. 2026:** ย้าย Ultrasonic จาก ESP2 ไปต่อที่ Raspberry Pi / ไม่ใช้ไมค์ในระบบ / Dashboard เป็นเว็บของทีมเอง และฝังกราฟจาก Grafana / MQTT ใช้ Bridge ผ่าน Pi ไปยัง Broker หลักบนคอมพิวเตอร์ (รายละเอียดใน `ARCHITECTURE.md`)
+> **อัปเดต 25 พ.ย. 2026:** ย้าย Ultrasonic จาก ESP2 ไปต่อที่ Raspberry Pi / ไม่ใช้ไมค์ในระบบ / Dashboard เป็นเว็บของทีมเอง และฝังกราฟจาก Grafana / MQTT ใช้ Broker ตัวเดียวบน Pi (ไม่มี Bridge, อัปเดต 26 พ.ย. 2026) รายละเอียดใน `ARCHITECTURE.md`
 
 ---
 
@@ -26,11 +26,11 @@
    * **Camera Module / Video Stream:** ถ่ายภาพผู้เล่น รัน AI Model ตรวจจับการขยับ (Keypoint/Motion Detection) และคำนวณค่า FPS
    * **Ultrasonic Sensor (HC-SR04):** วัดระยะห่างของผู้เล่นเทียบกับเส้นชัย *(ขา Echo เป็น 5V ต้องผ่าน Voltage Divider เช่น 1kΩ/2kΩ ก่อนเข้า GPIO 3.3V)*
    * **Touch Module (เส้นชัย):** ต่อกับขา GPIO ของ Pi ใช้ตัดสินการชนะ
-   * **Mosquitto (Bridge):** ESP1/ESP2 ต่อ MQTT เข้าที่ Pi แล้ว Pi ส่งต่อ topic `rlgl/#` ไปยัง Broker หลักบนคอมพิวเตอร์ทั้งสองทาง *(แผนสำรอง: ESP ต่อคอมพิวเตอร์ตรง)*
+   * **Mosquitto (Broker เดียวของระบบ):** ESP1/ESP2, สคริปต์บน Pi และบริการบนคอมพิวเตอร์ (Game Engine, Telegraf, เว็บ) ต่อเข้า broker ตัวนี้ทั้งหมด เปิด WebSocket port 9001 ให้หน้าเว็บ *(แผนสำรอง: ย้าย broker ไปรันบนคอมพิวเตอร์)*
 
 4. **Computer (On-Premise Server)**
    * รัน **Game Engine** (คุม State Machine ทั้งหมด)
-   * รัน **MQTT Broker หลัก** (รองรับอย่างน้อย 3 Topics แยกตามแหล่งข้อมูล) รับข้อมูลจาก Pi ผ่าน Bridge
+   * เป็น **MQTT Client** ต่อเข้า broker บน Pi (ระบบมี topic แยกตามแหล่งข้อมูลอย่างน้อย 3 topics)
    * รัน **Time-Series Database** (InfluxDB) สำหรับเก็บข้อมูลเซนเซอร์ย้อนหลัง
    * รัน **Web Dashboard** ของทีมเอง (หน้าเกม, วิดีโอ, ปุ่มควบคุม) และ **Grafana** สำหรับกราฟ Real-time/Historical ที่ฝังเข้าหน้าเว็บด้วย iframe
    * เชื่อมต่อ **AI Service (Cloud API)** (เช่น Gemini API / OpenAI API / TTS) สำหรับสร้างคำพากย์/บทวิเคราะห์หลังจบเกม
@@ -89,7 +89,7 @@ Game Engine บนคอมพิวเตอร์ควบคุมสถา�
 | **1. Game Display (Real-time)** | • แถบสถานะเกมชัดเจน (`IDLE` / `GREEN LIGHT` / `RED LIGHT` / `WIN` / `GAME OVER` แบบนิ่งไม่กะพริบ) + นาฬิกานับถอยหลัง<br>• **Live Video Stream** พร้อมกรอบ AI จับการขยับ และตัวเลข **FPS** แบบ Real-time<br>• **Distance Progress Bar** แสดงระยะห่างจากเส้นชัย | Game Engine,<br>Raspberry Pi (Camera, Ultrasonic) | เว็บของทีม |
 | **2. Player Telemetry (Real-time)** | • ตัวเลขและกราฟเส้น **Heartbeat (BPM)** แบบ Real-time<br>• **เกจวัดความนิ่ง (Gyro Stability Meter)** แสดงระดับความสั่นของข้อมือเทียบกับขีดอันตราย | ESP1 (Heartbeat, Gyro) ผ่าน InfluxDB | Grafana (Time series + Gauge panel) |
 | **3. Historical & AI Insights** | • **กราฟย้อนหลัง (Time-Series Chart):** เลือกดูกราฟ BPM และ Gyro ของรอบที่ผ่านมาได้<br>• **Match History / Leaderboard:** ตารางประวัติผู้เล่น (แพ้/ชนะ, เวลา, Max BPM)<br>• **AI Commentator Box:** ข้อความวิเคราะห์/คำพากย์จาก AI Service หลังจบเกม | Time-Series DB (InfluxDB),<br>AI Service API | กราฟ + ตาราง: Grafana<br>AI Box: เว็บของทีม |
-| **4. Control & System Status** | • ปุ่ม `Start` / `Reset` / `Calibrate` และสวิตช์สลับโหมด Servo (**Auto** vs **Joystick**)<br>• **Device Status:** ไฟสถานะ Online/Offline ของ ESP1, ESP2, Pi และ Broker | Computer (MQTT Broker) | เว็บของทีม |
+| **4. Control & System Status** | • ปุ่ม `Start` / `Reset` / `Calibrate` และสวิตช์สลับโหมด Servo (**Auto** vs **Joystick**)<br>• **Device Status:** ไฟสถานะ Online/Offline ของ ESP1, ESP2, Pi และ Broker | Pi (MQTT Broker) | เว็บของทีม |
 
 **ตั้งค่า Grafana ให้ฝังได้ (`grafana.ini`):**
 * `[security] allow_embedding = true`

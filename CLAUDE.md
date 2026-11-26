@@ -14,7 +14,7 @@
 | ไฟล์ | เนื้อหา |
 | :--- | :--- |
 | `red_light_green_light_iot_spec.md` | สเปก: ฮาร์ดแวร์, state machine, dashboard, edge cases, checklist เกณฑ์ |
-| `ARCHITECTURE.md` | การตัดสินใจล่าสุด: MQTT bridge, ใครคำนวณอะไร, แผนสำรอง, สถานะเทียบเกณฑ์ 25 คะแนน |
+| `ARCHITECTURE.md` | การตัดสินใจล่าสุด: broker เดียวบน Pi, ใครคำนวณอะไร, แผนสำรอง, สถานะเทียบเกณฑ์ 25 คะแนน |
 
 ถ้าสองไฟล์ขัดกัน ให้ยึด `ARCHITECTURE.md` (ใหม่กว่า) และแก้ให้ตรงกัน
 
@@ -24,11 +24,11 @@
 | :--- | :--- | :--- |
 | ESP1 (ข้อมือ) | Sensor Node | Heartbeat + MPU6050 (I2C) |
 | ESP2 (สถานี) | Sensor Node | Joystick, Pan-Tilt Servo ×2, Red LED ดวงเดียว (ดับ/ติดค้าง/กะพริบ) |
-| Raspberry Pi | Gateway | กล้อง + MediaPipe Pose, Ultrasonic HC-SR04, Touch, Mosquitto (bridge) |
-| โน้ตบุ๊ก | On-premise server | Mosquitto หลัก, Game Engine, InfluxDB, เว็บของทีม + Grafana (iframe), เรียก Gemini |
+| Raspberry Pi | Gateway | กล้อง + MediaPipe Pose, Ultrasonic HC-SR04, Touch, **Mosquitto (broker เดียวของระบบ)** |
+| โน้ตบุ๊ก | On-premise server | Game Engine, InfluxDB, เว็บของทีม + Grafana (iframe), เรียก Gemini |
 
-* **MQTT (แผนหลัก):** ESP → broker บน Pi → bridge `rlgl/#` ทั้งสองทาง → broker บนโน้ตบุ๊ก
-* **แผนสำรอง:** ESP ต่อ broker บนโน้ตบุ๊กตรง (เปลี่ยนแค่ IP)
+* **MQTT (แผนหลัก):** broker ตัวเดียวบน Pi ESP, สคริปต์บน Pi และบริการบนโน้ตบุ๊ก (Game Engine, Telegraf, backend, เว็บ) ต่อเข้า broker ตัวนี้ทั้งหมด ไม่มี bridge
+* **แผนสำรอง:** ย้าย broker ไปรันบนโน้ตบุ๊ก แล้วเปลี่ยน IP ของทุกตัวให้ชี้ไปที่โน้ตบุ๊ก (ใช้ถ้า Pi ไม่เสถียร หรืออาจารย์ต้องการให้ broker อยู่ฝั่ง server)
 * **Pi** ตัดสินเฉพาะเรื่องภาพ แล้ว publish ผลสรุป เช่น `{"moved": true, "part": "left_arm", "score": 0.08}`
 * **Game Engine บนโน้ตบุ๊ก** เป็นคนตัดสิน `GAME_OVER` / `WIN`: state + grace period + `gyro > thr OR Pi ขยับ` + touch
 * Pi ต้อง subscribe state ของเกม เพื่อเก็บท่าตั้งต้นตอนเข้า `RED_LIGHT` (ไม่จับเวลาเอง)
@@ -79,7 +79,7 @@ MediaPipe มี 33 จุด แปลงเหลือ 17 ด้วย `MP_TO
 * เอกสาร คอมเมนต์ และข้อความถึงผู้ใช้เป็น**ภาษาไทย** ชื่อตัวแปร ฟังก์ชัน และ topic เป็นภาษาอังกฤษ
 * ข้อความที่วาดบนภาพด้วย `cv2.putText` ต้องเป็นภาษาอังกฤษ (OpenCV แสดงภาษาไทยไม่ได้)
 * IP ของ broker อ่านจาก config ที่เดียว: ESP ใช้ `#define MQTT_HOST`, Python ใช้ `config.yaml` / `.env`
-* MQTT topic ขึ้นต้นด้วย `rlgl/` เสมอ (bridge ส่งต่อเฉพาะ `rlgl/#`)
+* MQTT topic ขึ้นต้นด้วย `rlgl/` เสมอ
 * โค้ดบน ESP ห้ามใช้ `delay()` ใน loop หลัก (โดยเฉพาะตอนกะพริบ LED) ใช้ `millis()` เพื่อให้ `client.loop()` ทำงานตลอด
 * อย่า commit ไฟล์โมเดลหรือผลทดสอบ: `*.pt`, `*.task`, `captures/` (ต้องเพิ่มใน `.gitignore`)
 
@@ -91,4 +91,4 @@ MediaPipe มี 33 จุด แปลงเหลือ 17 ด้วย `MP_TO
 * **ข้อ 7.2:** ยังไม่ได้เขียนส่วนเรียก Gemini (timeout 3–5 วินาที + ข้อความสำรอง)
 * **ข้อ 1 (ความเสี่ยง):** ถ้าอาจารย์ไม่นับกล้องและ joystick เป็น sensor จะเหลือ 4 ชนิด
 * **ข้อ 14–15:** สไลด์และวิดีโอ
-* **ถามอาจารย์/TA:** Sensor Node ต้องเชื่อมผ่าน Gateway หรือไม่ (ถ้าไม่ต้อง ใช้แผนสำรองได้เลย)
+* **ถามอาจารย์/TA:** ข้อ 11 ต้องให้ broker (message queue) อยู่ฝั่ง server หรือไม่ (ถ้าต้อง ให้สลับไปแผนสำรอง)
