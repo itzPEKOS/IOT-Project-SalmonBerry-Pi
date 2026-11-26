@@ -60,10 +60,22 @@ STATE_COLOR = {"GREEN_LIGHT": (0, 200, 0), "TRANSITION": (0, 200, 255), "RED_LIG
 
 # ---------------------------------------------------------------- camera
 class Camera:
-    """picam = กล้อง CSI บน Pi (picamera2), ตัวเลข = เว็บแคม/USB"""
+    """picam = กล้อง CSI บน Pi (picamera2), ตัวเลข = เว็บแคม/USB, ชื่อไฟล์ = เล่นวิดีโอวนซ้ำแทนกล้อง (ไว้ทดสอบ)"""
 
     def __init__(self, source, w, h):
         self.picam = self.cap = None
+        self.file, self.dt, self.t_next = False, 0.0, 0.0
+        if source != "picam" and not str(source).isdigit():
+            if not os.path.exists(source):
+                raise RuntimeError(f"ไม่พบไฟล์วิดีโอ {source}")
+            self.cap = cv2.VideoCapture(source)
+            if not self.cap.isOpened():
+                raise RuntimeError(f"เปิดไฟล์วิดีโอ {source} ไม่ได้")
+            self.file = True
+            fps = self.cap.get(cv2.CAP_PROP_FPS) or 15
+            self.dt = 1.0 / min(max(fps, 1), 30)
+            print(f"ใช้ไฟล์วิดีโอแทนกล้อง: {source} ({fps:.0f} fps, เล่นวนซ้ำ)")
+            return
         if source == "picam":
             from picamera2 import Picamera2
             self.picam = Picamera2()
@@ -81,6 +93,16 @@ class Camera:
     def read(self):
         if self.picam is not None:
             return self.picam.capture_array()
+        if self.file:  # เล่นตามเวลาจริง แล้ววนกลับต้นไฟล์
+            wait = self.t_next - time.perf_counter()
+            if wait > 0:
+                time.sleep(wait)
+            self.t_next = time.perf_counter() + self.dt
+            ok, f = self.cap.read()
+            if not ok:
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, f = self.cap.read()
+            return f if ok else None
         ok, f = self.cap.read()
         return f if ok else None
 
@@ -358,13 +380,20 @@ class App:
         state, rid, caught, r = None, None, None, None
         fps = infer_ms = 0.0
         t_prev = t_beat = time.perf_counter()
+        t_last_frame = t_warn = time.perf_counter()
         os.makedirs("captures", exist_ok=True)
+        print(f"เปิดกล้อง/วิดีโอแล้ว ({a.source}) รอภาพเฟรมแรก…")
         try:
             while self.running:
                 frame = cam.read()
                 if frame is None:
+                    if time.perf_counter() - t_last_frame > 3 and time.perf_counter() - t_warn > 3:
+                        t_warn = time.perf_counter()
+                        print(f"** อ่านภาพจากกล้อง '{a.source}' ไม่ได้มา {time.perf_counter() - t_last_frame:.0f} วินาที "
+                              "เช็ก: ls /dev/video* / v4l2-ctl --list-devices / ลอง --source 1 หรือ --source <ไฟล์วิดีโอ>")
                     time.sleep(0.05)
                     continue
+                t_last_frame = time.perf_counter()
                 t0 = time.perf_counter()
                 cur = pose(frame)
                 dt = (time.perf_counter() - t0) * 1000
@@ -513,7 +542,7 @@ def make_handler(app):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="picam", help='"picam" = กล้อง CSI บน Pi, ตัวเลข = เว็บแคม (laptop ใช้ 0)')
+    ap.add_argument("--source", default="picam", help='"picam" = กล้อง CSI บน Pi, ตัวเลข = เว็บแคม (laptop ใช้ 0), ชื่อไฟล์ = วิดีโอทดสอบ')
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--variant", choices=["lite", "full", "heavy"], default="lite")

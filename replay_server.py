@@ -83,7 +83,7 @@ def index():
     rows = "".join(
         f'<div class="row"><span class="badge {d.get("result") or ""}">{d.get("result") or "?"}</span>'
         f'<b>round {d.get("round_id")}</b><span>{d.get("cause") or ""} {d.get("part") or ""} {d.get("joint") or ""}</span>'
-        f'<span class="muted">event at {d.get("moved_at")} s · {d.get("created", "")}</span>'
+        f'<span class="muted">{d.get("duration", "?")} s · event at {d.get("moved_at")} s · {d.get("created", "")}</span>'
         f'<a href="/replay/{d["name"]}">▶ open</a></div>' for d in list_meta())
     return f"<!doctype html><meta charset=utf-8><title>Replays</title>{STYLE}<h1>REPLAYS</h1>" + (rows or '<p class="muted">ยังไม่มีคลิป</p>')
 
@@ -96,7 +96,7 @@ def player(name):
     return f"""<!doctype html><meta charset=utf-8><title>Replay {name}</title>{STYLE}
 <p><a href="/">◀ all replays</a></p><h1 id="title">REPLAY</h1><p id="cause" class="muted"></p>
 <video id="v" controls style="width:800px;max-width:100%;background:#000;border:4px solid #05060F"></video>
-<div style="margin:10px 0"><button class="red" id="jump">JUMP TO MOVE</button><button id="slow">SLOW-MO 0.25×</button><button id="normal">1×</button></div>
+<div style="margin:10px 0"><button id="start">▶ FROM START</button><button class="red" id="jump">JUMP TO MOVE</button><button id="slow">SLOW-MO 0.25×</button><button id="normal">1×</button></div>
 <canvas id="tl" width="800" height="150" style="max-width:100%;background:#0A0B17;border:3px solid #05060F"></canvas>
 <p class="muted">แถบบน = สีไฟ · แท่ง = motion score (เส้นเหลือง = เกณฑ์ 1.0) · เส้นแดง = จังหวะที่เกิดเหตุ · เส้นขาว = ตำแหน่งที่กำลังเล่น · คลิกที่ timeline เพื่อกระโดดไปเวลานั้น</p>
 <script>
@@ -104,16 +104,19 @@ const v=document.getElementById('v'),cv=document.getElementById('tl'),ctx=cv.get
 const COL={{GREEN_LIGHT:'#3BE36B',TRANSITION:'#FFC93C',RED_LIGHT:'#FF3B4E',GAME_OVER:'#A31327',WIN:'#1E5A35',CALIBRATE:'#45D6FF'}};
 fetch('/replays/{name}.json').then(r=>r.json()).then(m=>{{meta=m;v.src='/replays/'+m.video;
  document.getElementById('title').textContent=(m.result||'')+' · ROUND '+m.round_id;
- document.getElementById('cause').textContent=[m.cause,m.part&&(m.part+' / '+m.joint),m.score&&('score '+m.score),'event at '+m.moved_at+' s of '+m.duration+' s'].filter(Boolean).join(' · ');
+ document.getElementById('cause').textContent=[m.cause,m.part&&(m.part+' / '+m.joint),m.score&&('score '+m.score),m.moved_at!=null&&('event at '+m.moved_at+' s'),'length '+m.duration+' s'].filter(Boolean).join(' · ');
+ if(m.result==='WIN')document.getElementById('jump').textContent='JUMP TO FINISH';
+ if(m.moved_at==null)document.getElementById('jump').style.display='none';
  draw();}});
 const X=t=>t/meta.duration*cv.width;
 function draw(){{if(!meta)return;ctx.clearRect(0,0,cv.width,cv.height);
  const fr=meta.frames;for(let i=0;i<fr.length;i++){{const a=fr[i].t,b=i+1<fr.length?fr[i+1].t:meta.duration;ctx.fillStyle=COL[fr[i].state]||'#3A3F86';ctx.fillRect(X(a),0,X(b)-X(a)+1,18);
   if(fr[i].score!=null){{const h=Math.min(fr[i].score,2.5)/2.5*110;ctx.fillStyle=fr[i].score>1?'#FF3B4E':'#3BE36B';ctx.fillRect(X(a),140-h,Math.max(2,X(b)-X(a)-1),h);}}}}
  ctx.fillStyle='#FFC93C';for(let x=0;x<cv.width;x+=10)ctx.fillRect(x,140-110/2.5,6,2);
- ctx.fillStyle='#FF3B4E';ctx.fillRect(X(meta.moved_at)-1,0,3,cv.height);ctx.font='bold 13px monospace';ctx.fillText((meta.result==='WIN'?'FINISH ':'MOVED ')+meta.moved_at+'s',Math.min(X(meta.moved_at)+6,cv.width-110),34);
+ if(meta.moved_at!=null){{ctx.fillStyle='#FF3B4E';ctx.fillRect(X(meta.moved_at)-1,0,3,cv.height);ctx.font='bold 13px monospace';ctx.fillText((meta.result==='WIN'?'FINISH ':'MOVED ')+meta.moved_at+'s',Math.min(X(meta.moved_at)+6,cv.width-110),34);}}
  ctx.fillStyle='#F4F1E8';ctx.fillRect(X(v.currentTime||0)-1,0,2,cv.height);}}
 v.addEventListener('timeupdate',draw);setInterval(draw,100);
+document.getElementById('start').onclick=()=>{{v.currentTime=0;v.playbackRate=1;v.play();}};
 document.getElementById('jump').onclick=()=>{{v.currentTime=Math.max(0,meta.moved_at-0.5);v.playbackRate=0.25;v.play();}};
 document.getElementById('slow').onclick=()=>v.playbackRate=0.25;document.getElementById('normal').onclick=()=>v.playbackRate=1;
 cv.onclick=e=>{{const r=cv.getBoundingClientRect();v.currentTime=(e.clientX-r.left)/r.width*meta.duration;}};
