@@ -90,6 +90,14 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
 
+# วงภายในของ Docker ต้องไม่ทับวงที่ Pi อยู่ ไม่งั้น Telegraf หา Pi ไม่เจอ (no route to host)
+# ค่าเริ่มต้นของ Docker คือ 172.17-172.31.x.x ซึ่งทับ hotspot iPhone (172.20.10.x)
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 192.168.250.0/24
+
 volumes:
   mosquitto-data:
   influxdb-data:

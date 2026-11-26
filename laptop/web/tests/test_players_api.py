@@ -53,6 +53,18 @@ def test_a_bad_name_is_refused_and_keeps_the_current_player(tmp_path):
         assert client.get("/api/session").json()["player"]["name"] == "BERRY"
 
 
+def test_a_numeric_round_id_from_the_game_engine_is_saved_as_text(tmp_path):
+    # game engine ใช้ round_id เป็นตัวเลข เพราะ pi_client.py จัดรูปแบบด้วย :03d
+    client, _ = make(tmp_path)
+    with client:
+        choose(client, "berry")
+        play(client, round_id=1795686400)
+        body = detail(client, "1795686400").json()
+        assert body["round_id"] == "1795686400"
+        assert body["player"] == "BERRY"
+        assert body["result"] == "WIN"
+
+
 def test_clearing_the_name_makes_the_next_round_a_guest_round(tmp_path):
     client, _ = make(tmp_path)
     with client:

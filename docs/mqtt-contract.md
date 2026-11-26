@@ -5,6 +5,7 @@
 - payload เป็น JSON object แบบชั้นเดียว
 - ทุกข้อความมี `device_id` (string), `seq` (ตัวเลขเพิ่มทีละ 1) และ `ts` (epoch มิลลิวินาที ถ้า ESP32 ยังไม่ sync เวลา ให้ใส่ `millis()` ได้ เพราะ dashboard ใช้เวลาตอนรับข้อความ)
 - ข้อความจาก `game`, `uploader`, `backend` มี `round_id` (ใช้ได้เฉพาะ `A-Z a-z 0-9 _ -` และต้องไม่ซ้ำกันในแต่ละรอบ)
+  game engine (`laptop/engine`) ส่ง `round_id` เป็น**ตัวเลข** (epoch วินาที) เพราะ `pi_client.py` จัดรูปแบบด้วย `:03d` backend แปลงเป็นข้อความเอง
 - ค่าที่เป็นจริง/เท็จ ให้ส่งเป็น `1` / `0`
 - ชื่อ state: `IDLE`, `CALIBRATE`, `GREEN_LIGHT`, `TRANSITION`, `RED_LIGHT`, `GAME_OVER`, `WIN`
 
@@ -25,7 +26,12 @@
 | `rlgl/game/summary` | backend | 1 | `round_id`, `bpm_avg`, `bpm_max`, `red_motion_max`, `red_acc_peak_max`, `red_light_count`, `distance_cm` (ค่าสุดท้ายตอนเล่น), `finish_state` (ไฟตอนแตะเส้นชัย), `closest_call` (ค่าที่ไม่มีข้อมูลจะไม่ถูกส่ง; `red_acc_peak_max` ไม่นับ 200 ms สุดท้ายก่อนเปลี่ยนเป็นไฟเขียว) |
 | `rlgl/status/<device_id>` | ทุกอุปกรณ์ | 1 / retain, ตั้ง LWT | `status` = `online`, `offline` |
 
-`device_id` ของแต่ละตัว: `wrist-01`, `station-01`, `gateway-01`, `backend-01`, `web-01`
+`device_id` ของแต่ละตัว: `wrist-01`, `station-01`, `gateway-01`, `backend-01`, `web-01`, `game-01` (game engine บน laptop)
+ตอนนี้ `pi_client.py` รายงานสถานะที่ `rlgl/status/pi` game engine รับทั้ง `pi` และ `gateway-01`
+
+**เริ่มรอบ:** ESP2 ส่ง `rlgl/station/button` `{"pressed": 1}` (ปุ่ม START บน joystick) หรือส่ง `rlgl/cmd/game` `{"cmd": "start"}` (`"abort"` = ยกเลิกรอบ) game engine เริ่มรอบเมื่อ state เป็น `IDLE`, `WIN` หรือ `GAME_OVER`
+**หลังจบรอบ:** state `WIN` / `GAME_OVER` ค้างไว้จนรอบถัดไปเริ่ม (หน้าเว็บแสดงผลจนกว่าจะกด PLAY AGAIN) ส่วน `ABORTED` กลับ `IDLE` ทันที
+**ลำดับ:** game engine ส่ง `rlgl/game/result` ก่อน state สุดท้ายเสมอ และใส่ `cause`, `part`, `score` (ชื่อที่ `pi_client.py` อ่าน) ซ้ำกับ `reason`, `caught_part`, `caught_score_ratio`
 
 **ไม่มี LED:** หน้าเว็บเกมเป็นจอสถานะของผู้เล่น หน้าเว็บต่อกับ backend ผ่าน WebSocket (ไม่ต่อ MQTT เอง) และ **backend เป็นคน publish `rlgl/status/web-01`** ตามว่ามีจอผู้เล่นต่ออยู่ไหม
 backend ตั้ง LWT ให้ `backend-01` เท่านั้น game engine จึงต้องให้ **`web-01` และ `backend-01` เป็น `online` ทั้งคู่** จึงเริ่มรอบได้ ถ้าตัวใด `offline` ระหว่างเล่นให้ยกเลิกรอบ (`reason` = `disconnect`)
@@ -67,7 +73,7 @@ backend ตั้ง LWT ให้ `backend-01` เท่านั้น game en
 |---|---|
 | `WIN` | `touch` |
 | `GAME_OVER` | `camera`, `imu`, `both`, `timeout`, `finish_during_red`, `hits` (sniper) |
-| `ABORTED` (ยกเลิกรอบ แล้ว state กลับ `IDLE`) | `disconnect`, `camera_lost` |
+| `ABORTED` (ยกเลิกรอบ แล้ว state กลับ `IDLE`) | `disconnect`, `camera_lost`, `operator` (คนคุมกดยกเลิก) |
 
 ## การส่งวิดีโอ (HTTP ไม่ใช่ MQTT)
 

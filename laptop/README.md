@@ -81,6 +81,14 @@ python set_broker_ip.py <IP ใหม่>
 
 backend และหน้าเว็บอยู่ใน [`web/`](web/README.md) เปิดทั้งหมดด้วย `web\run.cmd`
 
+## Game engine
+
+ตัวคุมเกมและตัดสินแพ้ชนะอยู่ใน [`engine/`](engine/README.md) เปิดด้วย `engine\run.cmd` แล้วกด Enter เพื่อเริ่มรอบ
+
+## ถ้า Telegraf ต่อ Pi ไม่ได้ (`no route to host`)
+
+วงภายในของ Docker ต้องไม่ทับวงที่ Pi อยู่ `docker-compose.yml` ตั้งไว้ที่ `192.168.250.0/24` เพื่อไม่ให้ทับ hotspot iPhone (`172.20.10.x`) ถ้าวง Wi-Fi ที่ใช้เป็น `192.168.250.x` พอดี ให้เปลี่ยน subnet ใน `docker-compose.yml` แล้วรัน `docker compose down` ตามด้วย `docker compose up -d` (ข้อมูลไม่หาย)
+
 ## ล้างข้อมูลทดสอบ (ครั้งเดียว ก่อนเริ่มเก็บข้อมูลจริง)
 
 ข้อมูลจากตัวจำลองที่ส่งผ่าน broker ปนอยู่ใน InfluxDB และแยกจากของจริงไม่ได้ (ใช้ชื่ออุปกรณ์เดียวกัน) ล้างครั้งเดียวก่อนวันเก็บข้อมูลจริง หลังจากนั้นทดสอบด้วย `web\run.cmd -Sim` ซึ่งไม่ส่งอะไรเข้า InfluxDB

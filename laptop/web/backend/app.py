@@ -149,6 +149,10 @@ class Hub:
         self.seq = {}
 
     def dispatch(self, topic, payload):
+        round_id = payload.get("round_id")
+        # game engine ส่ง round_id เป็นตัวเลข (pi_client.py ต้องการแบบนั้น) ส่วน backend เก็บเป็นข้อความ
+        if isinstance(round_id, int) and not isinstance(round_id, bool) and round_id >= 0:
+            payload = {**payload, "round_id": str(round_id)}
         outcome = self.tracker.handle(topic, payload)
         if outcome.accepted:
             self._broadcast({"type": "message", "topic": topic, "payload": payload})
