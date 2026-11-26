@@ -1,4 +1,5 @@
-"""Backend ของเกม: รับ MQTT -> ส่งให้หน้าเว็บ, สรุปแต่ละรอบ, รับและให้บริการวิดีโอ
+"""Backend ของเกม: รับ MQTT -> ส่งให้หน้าเว็บ, สรุปแต่ละรอบ, รับและให้บริการวิดีโอ,
+เก็บชื่อผู้เล่นและผลแต่ละรอบ (SQLite)
 
 รันจากโฟลเดอร์ laptop/web:
     python -m uvicorn backend.app:make_app --factory --host 127.0.0.1 --port 8000
@@ -12,18 +13,24 @@ import math
 import os
 import pathlib
 import re
+import shutil
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend.tracker import MEDIA, SUMMARY, GameTracker
+from backend.clips import (ConversionFailed, LocalClips, SupabaseClips, UploadFailed, detect_kind, mjpeg_to_mp4,
+                           remove_tree)
+from backend.store import DEFAULT_MODE, Store, clean_mode, clean_name
+from backend.tracker import MEDIA, MODE, PLAYING, RESULT, STATE, SUMMARY, GameTracker
 
 log = logging.getLogger("uvicorn.error")
 
@@ -32,7 +39,9 @@ LAPTOP_DIR = WEB_DIR.parent
 BACKEND_ID, SCREEN_ID = "backend-01", "web-01"
 BACKEND_STATUS = f"rlgl/status/{BACKEND_ID}"
 SCREEN_STATUS = f"rlgl/status/{SCREEN_ID}"
-OWN_TOPICS = {SUMMARY, MEDIA, BACKEND_STATUS, SCREEN_STATUS}
+OWN_TOPICS = {SUMMARY, MEDIA, MODE, BACKEND_STATUS, SCREEN_STATUS}
+GameMode = Literal["rlgl", "sniper"]
+SERVER_PATHS = ("/api", "/clips", "/dev", "/ws", "/docs", "/redoc", "/openapi")  # ไม่ใช่ไฟล์หน้าเว็บ
 ROUND_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 CHUNK = 1024 * 1024
 QUEUE_LIMIT = 500
@@ -42,6 +51,7 @@ KEEPALIVE_S = 5
 @dataclass
 class Settings:
     clips_dir: pathlib.Path = WEB_DIR / "clips"
+    db_path: pathlib.Path | None = None  # None = เก็บในหน่วยความจำ (ใช้ในเทสต์)
     mqtt_host: str | None = "127.0.0.1"
     mqtt_port: int = 1883
     mqtt_user: str = ""
@@ -53,6 +63,21 @@ class Settings:
     display_timeout: float = 6.0
     cors_origins: tuple = ()
     web_dir: pathlib.Path | None = None
+    stream_url: str | None = None  # ภาพสดจาก Pi (MJPEG ผ่าน HTTP) ที่หน้าเว็บดึงเอง
+    grafana_url: str | None = None
+    track_cm: int = 300  # ระยะจาก ultrasonic ถึงเส้นเริ่ม ใช้คิดความคืบหน้าบนหน้าเว็บ
+    # วิดีโอ: ตั้ง Supabase แล้วจะเก็บใน cloud อย่างเดียว ถ้าไม่ตั้งจะเก็บใน clips_dir
+    supabase_url: str | None = None
+    supabase_key: str | None = None
+    supabase_bucket: str = "clips"
+    clip_url_ttl_s: int = 3600
+    temp_dir: pathlib.Path | None = None  # ที่พักไฟล์ระหว่างแปลง (ลบทุกครั้ง) None = temp ของระบบ
+    ffmpeg: str = "ffmpeg"
+    isolated: bool = False  # ทดสอบในเครื่องนี้อย่างเดียว: ไม่ต่อ broker ไม่อัป cloud (run.cmd -Sim)
+
+    @property
+    def cloud_clips(self):
+        return bool(self.supabase_url and self.supabase_key) and not self.isolated
 
     @classmethod
     def from_env(cls):
@@ -64,8 +89,15 @@ class Settings:
                     key, value = line.split("=", 1)
                     values[key.strip()] = value.strip()
         values.update(os.environ)
+        isolated = values.get("RLGL_ISOLATED") == "1"
+        if isolated:  # ไม่สนค่า broker และ Supabase ใน .env
+            values["RLGL_MQTT_HOST"] = ""
+            values.pop("SUPABASE_URL", None)
+            values.pop("SUPABASE_SERVICE_KEY", None)
         return cls(
+            isolated=isolated,
             clips_dir=pathlib.Path(values.get("RLGL_CLIPS_DIR") or WEB_DIR / "clips"),
+            db_path=pathlib.Path(values.get("RLGL_DB_PATH") or WEB_DIR / "data" / "rlgl.db"),
             mqtt_host=values.get("RLGL_MQTT_HOST", "127.0.0.1") or None,
             mqtt_port=int(values.get("RLGL_MQTT_PORT") or 1883),
             mqtt_user=values.get("MQTT_USER", ""),
@@ -76,6 +108,14 @@ class Settings:
             dev_mode=values.get("RLGL_DEV") == "1",
             cors_origins=tuple(o.strip() for o in values.get("RLGL_CORS_ORIGINS", "").split(",") if o.strip()),
             web_dir=WEB_DIR / "frontend",
+            stream_url=values.get("RLGL_STREAM_URL") or None,
+            grafana_url=values.get("RLGL_GRAFANA_URL") or None,
+            track_cm=int(values.get("RLGL_TRACK_CM") or 300),
+            supabase_url=values.get("SUPABASE_URL") or None,
+            supabase_key=values.get("SUPABASE_SERVICE_KEY") or None,
+            supabase_bucket=values.get("SUPABASE_BUCKET") or "clips",
+            clip_url_ttl_s=int(values.get("RLGL_CLIP_URL_TTL_S") or 3600),
+            ffmpeg=values.get("RLGL_FFMPEG") or "ffmpeg",
         )
 
 
@@ -97,8 +137,12 @@ def decode_mqtt(topic, raw):
 class Hub:
     """ทำงานบน event loop เดียว จึงไม่ต้องใช้ lock"""
 
-    def __init__(self, publisher):
+    def __init__(self, publisher, store):
         self.publisher = publisher
+        self.store = store
+        self.player_id = self.player_name = None  # คนที่จะเล่นรอบถัดไป
+        self.mode = DEFAULT_MODE  # โหมดที่เลือกจากหน้าเว็บ (game engine อ่านจาก rlgl/game/mode)
+        self.saved_round = None
         self.tracker = GameTracker()
         self.queues = set()
         self.displays = 0
@@ -108,8 +152,43 @@ class Hub:
         outcome = self.tracker.handle(topic, payload)
         if outcome.accepted:
             self._broadcast({"type": "message", "topic": topic, "payload": payload})
+            try:
+                self._record(topic, payload)
+            except Exception:  # ฐานข้อมูลมีปัญหาต้องไม่ทำให้จอผู้เล่นหยุดรับ state
+                log.exception("could not save %s", topic)
         for out_topic, body in outcome.outgoing:
             self.send(out_topic, body)
+
+    def _record(self, topic, payload):
+        if topic == STATE:
+            # ถ้า game engine ไม่ส่ง mode มา ใช้โหมดที่เลือกบนหน้าเว็บ
+            mode = clean_mode(payload.get("mode")) or self.mode
+            self._record_round_start(payload.get("round_id"), payload.get("state"), mode)
+        elif topic == RESULT:
+            self.store.finish_round(payload)
+        elif topic == SUMMARY:
+            self.store.save_summary(payload)
+        elif topic == MEDIA:
+            self.store.set_clip(payload["round_id"], f"{payload['round_id']}.mp4")
+
+    def _record_round_start(self, round_id, state, mode):
+        # state เป็น retained: WIN, GAME_OVER, IDLE อาจเป็นของรอบเก่าที่ถูกส่งซ้ำ จึงไม่สร้างรอบจากค่าเหล่านี้
+        if round_id == self.saved_round or state not in ("CALIBRATE", *PLAYING):
+            return
+        created = self.store.start_round(round_id, self.player_id, mode)
+        if not created and state == "CALIBRATE":
+            existing = self.store.round(round_id)
+            if existing and existing["result"]:
+                log.warning("round %s already has a result: the game engine must not reuse a round_id", round_id)
+        self.saved_round = round_id
+
+    def choose_player(self, player):
+        """player = {"id", "name"} หรือ None ถ้าเล่นแบบไม่ใส่ชื่อ"""
+        self.player_id = player["id"] if player else None
+        self.player_name = player["name"] if player else None
+        # ยังไม่เริ่มเล่น (calibrate อยู่) ชื่อใหม่ใช้กับรอบนี้ ถ้าเล่นแล้วใช้กับรอบถัดไป
+        if self.tracker.state == "CALIBRATE" and self.saved_round == self.tracker.round_id:
+            self.store.assign_player(self.saved_round, self.player_id)
 
     def send(self, topic, body, device=BACKEND_ID, qos=1, retain=False):
         """ข้อความที่ backend สร้างเอง: ส่งให้ browser และ publish เข้า MQTT"""
@@ -121,9 +200,14 @@ class Hub:
     def send_status(self, topic, device, online):
         self.send(topic, {"status": "online" if online else "offline"}, device=device, retain=True)
 
+    def choose_mode(self, mode):
+        self.mode = mode
+        self.send(MODE, {"mode": mode}, retain=True)
+
     def announce(self):
         self.send_status(BACKEND_STATUS, BACKEND_ID, True)
         self.send_status(SCREEN_STATUS, SCREEN_ID, self.displays > 0)
+        self.send(MODE, {"mode": self.mode}, retain=True)
 
     def display_changed(self, delta):
         was_online = self.displays > 0
@@ -190,15 +274,33 @@ class MqttLink:
             self.loop.call_soon_threadsafe(self.hub.dispatch, message.topic, payload)
 
 
+class PlayerName(BaseModel):
+    name: str
+
+
+class ModeChoice(BaseModel):
+    mode: GameMode
+
+
 class DevMessage(BaseModel):
     topic: str
     payload: dict
 
 
-def create_app(settings, publisher=None):
-    settings.clips_dir.mkdir(parents=True, exist_ok=True)
+def make_clips(settings):
+    if settings.cloud_clips:
+        return SupabaseClips(settings.supabase_url, settings.supabase_key, settings.supabase_bucket,
+                             ttl_s=settings.clip_url_ttl_s)
+    return LocalClips(settings.clips_dir)
+
+
+def create_app(settings, publisher=None, clips=None):
+    clips = clips or make_clips(settings)
+    if not clips.cloud and shutil.which(settings.ffmpeg) is None:
+        log.warning("ffmpeg not found: clips sent as JPEG frames cannot be converted")
+    store = Store(settings.db_path)
     link = MqttLink(settings) if publisher is None and settings.mqtt_host else None
-    hub = Hub(publisher or (link.publish if link else lambda *args: None))
+    hub = Hub(publisher or (link.publish if link else lambda *args: None), store)
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
@@ -212,11 +314,13 @@ def create_app(settings, publisher=None):
             hub.send_status(BACKEND_STATUS, BACKEND_ID, False)
             if link:
                 await run_in_threadpool(link.stop)
+            store.close()
 
     app = FastAPI(title="Red Light / Green Light backend", lifespan=lifespan)
+    app.state.store = store
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
-                           allow_methods=["GET"], allow_headers=["*"])
+                           allow_methods=["GET", "POST", "DELETE"], allow_headers=["*"])
 
     @app.middleware("http")
     async def reject_huge_uploads(request, call_next):
@@ -224,27 +328,40 @@ def create_app(settings, publisher=None):
         length = request.headers.get("content-length", "")
         if request.url.path == "/clips" and length.isdigit() and int(length) > settings.max_upload_bytes + 65536:
             return JSONResponse({"detail": "file too large"}, status_code=413)
-        return await call_next(request)
+        response = await call_next(request)
+        # ไฟล์หน้าเว็บ: ให้ browser ถามก่อนใช้ของที่เก็บไว้ จอผู้เล่นจะได้โค้ดใหม่เสมอหลังแก้
+        if not request.url.path.startswith(SERVER_PATHS):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     def clip_url(request, round_id):
         base = settings.public_base_url or str(request.base_url)
         return f"{base.rstrip('/')}/clips/{round_id}.mp4"
 
     @app.post("/clips")
-    async def receive_clip(request: Request, round_id: str = Form(...), video: UploadFile = File(...)):
+    async def receive_clip(request: Request, round_id: str = Form(...), video: UploadFile = File(...),
+                           fps: float | None = Form(None)):
+        """Pi ส่งวิดีโอทั้งรอบ: JPEG ต่อกัน (MJPEG) พร้อม fps ที่อัดได้จริง หรือ MP4 แบบ H.264
+        ตอบ 200 เมื่อเก็บสำเร็จแล้วเท่านั้น ถ้าได้คำตอบอื่น Pi ต้องเก็บไฟล์ไว้และส่งใหม่"""
         if settings.upload_token and not hmac.compare_digest(
                 request.headers.get("x-upload-token", "").encode(), settings.upload_token.encode()):
             raise HTTPException(401, "missing or wrong X-Upload-Token")
         if not ROUND_ID.fullmatch(round_id):
             raise HTTPException(422, "round_id may only use A-Z a-z 0-9 _ - (max 64)")
+        if fps is not None and not (math.isfinite(fps) and 1 <= fps <= 60):
+            raise HTTPException(422, "fps must be between 1 and 60")
 
-        partial = settings.clips_dir / f"{round_id}.{uuid.uuid4().hex[:8]}.part"
-        try:
-            size = 0
-            with partial.open("wb") as out:
+        if settings.temp_dir:
+            settings.temp_dir.mkdir(parents=True, exist_ok=True)
+        work = pathlib.Path(tempfile.mkdtemp(prefix="rlgl-clip-", dir=settings.temp_dir))
+        try:  # ไม่เก็บสำเนาไว้ในเครื่อง: ลบโฟลเดอร์พักทุกกรณี
+            received, kind, size = work / "received", None, 0
+            with received.open("wb") as out:
                 while chunk := await video.read(CHUNK):
-                    if size == 0 and chunk[4:8] != b"ftyp":
-                        raise HTTPException(415, "not an MP4 file")
+                    if size == 0:
+                        kind = detect_kind(chunk)
+                        if kind is None:
+                            raise HTTPException(415, "send JPEG frames (MJPEG) or an MP4 file")
                     size += len(chunk)
                     if size > settings.max_upload_bytes:
                         raise HTTPException(413, "file too large")
@@ -252,30 +369,127 @@ def create_app(settings, publisher=None):
                     await run_in_threadpool(out.write, chunk)
             if size == 0:
                 raise HTTPException(415, "empty file")
-            try:
-                partial.replace(settings.clips_dir / f"{round_id}.mp4")
-            except PermissionError:
-                raise HTTPException(503, "the old clip is in use, try again")
+            mp4 = received
+            if kind == "mjpeg":
+                mp4 = work / f"{round_id}.mp4"
+                await run_in_threadpool(mjpeg_to_mp4, received, mp4, fps or 15, settings.ffmpeg)
+            await run_in_threadpool(clips.save, mp4, round_id)
+        except ConversionFailed as error:
+            log.warning("clip %s could not be converted: %s", round_id, error)
+            raise HTTPException(422, "the frames could not be turned into a video")
+        except UploadFailed as error:
+            log.warning("clip %s not stored yet: %s", round_id, error)
+            raise HTTPException(503, "could not store the clip now: keep it and try again")
+        except RuntimeError as error:
+            log.error("%s", error)
+            raise HTTPException(503, str(error))
         finally:
-            partial.unlink(missing_ok=True)
+            await run_in_threadpool(remove_tree, work)
 
+        # ลิงก์ของ laptop ไม่หมดอายุและไม่มี token ของ cloud (ส่งต่อทาง MQTT และเก็บใน InfluxDB ได้)
         url = clip_url(request, round_id)
         hub.send(MEDIA, {"round_id": round_id, "status": "ready", "video_url": url})
         return {"url": url}
 
     @app.get("/api/health")
     async def health():
-        return {"status": "ok", "mqtt_connected": bool(link and link.connected), "displays": hub.displays}
+        return {"status": "ok", "mqtt_connected": bool(link and link.connected), "displays": hub.displays,
+                "isolated": settings.isolated}
 
     @app.get("/api/state")
     async def state():
         return {"messages": hub.tracker.snapshot()}
 
     @app.get("/api/clips")
-    def clips(request: Request):
+    async def clip_list(request: Request):
+        if clips.cloud:
+            return {"clips": [{"round_id": r, "url": clip_url(request, r)} for r in store.clip_rounds()]}
         files = sorted(settings.clips_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
         return {"clips": [{"round_id": f.stem, "url": clip_url(request, f.stem), "bytes": f.stat().st_size}
                           for f in files]}
+
+    if clips.cloud:
+        @app.get("/clips/{name}")
+        async def cloud_clip(name: str):
+            """ส่งต่อไปยังลิงก์ชั่วคราวของ cloud (ขอใหม่เมื่อใกล้หมดอายุ) วิดีโอจึงเล่นจาก cloud โดยตรง"""
+            round_id = name.removesuffix(".mp4")
+            row = store.round(round_id) if name.endswith(".mp4") and ROUND_ID.fullmatch(round_id) else None
+            if not row or not row["clip_file"]:
+                raise HTTPException(404, "no clip for this round")
+            try:
+                link = await run_in_threadpool(clips.signed_url, round_id)
+            except UploadFailed as error:
+                log.warning("cannot get a link for %s: %s", round_id, error)
+                raise HTTPException(503, "the cloud is not reachable right now")
+            return RedirectResponse(link, status_code=307)
+
+    # ---------- ผู้เล่น ประวัติ และอันดับ ----------
+    # ทุก endpoint ที่ใช้ฐานข้อมูลเป็น async เพื่อให้ SQLite ถูกใช้จาก thread เดียว
+
+    def with_video(request, row):
+        name = row.pop("clip_file", None)
+        available = bool(name) and (clips.cloud or clips.exists(row["round_id"]))
+        return {**row, "video_url": clip_url(request, row["round_id"]) if available else None}
+
+    @app.get("/api/config")
+    async def web_config():
+        return {"stream_url": settings.stream_url, "grafana_url": settings.grafana_url,
+                "track_cm": settings.track_cm}
+
+    def session():
+        stats = store.player_stats(hub.player_name, hub.mode) if hub.player_name else None
+        return {"player": stats, "next_round_number": store.next_number(), "mode": hub.mode}
+
+    @app.post("/api/mode")
+    async def set_mode(body: ModeChoice):
+        hub.choose_mode(body.mode)
+        return session()
+
+    @app.get("/api/session")
+    async def current_session():
+        return session()
+
+    @app.post("/api/session")
+    async def set_player(body: PlayerName):
+        if clean_name(body.name) is None:
+            raise HTTPException(422, "name: 1-10 characters, A-Z 0-9 _ - only")
+        hub.choose_player(store.select_player(body.name))
+        return session()
+
+    @app.delete("/api/session")
+    async def clear_player():
+        hub.choose_player(None)
+        return session()
+
+    @app.get("/api/players")
+    async def recent_players(limit: int = Query(4, ge=1, le=50)):
+        return {"players": store.recent_players(limit)}
+
+    @app.get("/api/players/{name}")
+    async def player_detail(name: str, mode: GameMode = DEFAULT_MODE):
+        stats = store.player_stats(name, mode)
+        if stats is None:
+            raise HTTPException(404, "unknown player")
+        return stats
+
+    @app.get("/api/leaderboard")
+    async def leaderboard(limit: int = Query(7, ge=1, le=50), mode: GameMode = DEFAULT_MODE):
+        return {"entries": store.leaderboard(limit, mode)}
+
+    @app.get("/api/rounds")
+    async def round_history(request: Request, result: Literal["all", "win", "loss"] = "all",
+                            page: int = Query(1, ge=1, le=100000), page_size: int = Query(7, ge=1, le=50),
+                            mode: GameMode | None = None):
+        history = store.history(result, page, page_size, mode)
+        history["rounds"] = [with_video(request, row) for row in history["rounds"]]
+        return history
+
+    @app.get("/api/rounds/{round_id}")
+    async def round_detail(request: Request, round_id: str):
+        row = store.round(round_id)
+        if row is None:
+            raise HTTPException(404, "unknown round")
+        return {**with_video(request, row), "standing": store.standing(round_id)}
 
     @app.post("/dev/publish")
     async def dev_publish(request: Request, message: DevMessage):
@@ -331,7 +545,8 @@ def create_app(settings, publisher=None):
             with contextlib.suppress(Exception):
                 await websocket.close()
 
-    app.mount("/clips", StaticFiles(directory=settings.clips_dir), name="clips")
+    if not clips.cloud:
+        app.mount("/clips", StaticFiles(directory=clips.folder), name="clips")
     if settings.web_dir and (settings.web_dir / "index.html").exists():
         app.mount("/", StaticFiles(directory=settings.web_dir, html=True), name="web")
     return app

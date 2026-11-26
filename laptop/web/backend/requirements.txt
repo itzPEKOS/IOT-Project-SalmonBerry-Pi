@@ -3,7 +3,9 @@ uvicorn>=0.30
 websockets>=13
 python-multipart>=0.0.9
 paho-mqtt>=2.0
+httpx>=0.27            # อัปโหลดวิดีโอขึ้น Supabase Storage (และใช้ในเทสต์)
 
 # สำหรับรันเทสต์
 pytest>=8
-httpx>=0.27
+
+# ต้องมี ffmpeg ใน PATH ด้วย (แปลง JPEG จาก Pi เป็น MP4)
