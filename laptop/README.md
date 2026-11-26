@@ -44,6 +44,16 @@ python ../sim/simulate.py --rounds 3 --fake-backend
 
 ห้าม commit ไฟล์ `.env` (repo นี้เป็น public)
 
+## ถ้า IP ของ Pi เปลี่ยน
+
+รันคำสั่งเดียวในโฟลเดอร์ `laptop/infra` (ดู IP ใหม่บน Pi ด้วย `hostname -I`):
+
+```powershell
+python set_broker_ip.py <IP ใหม่>
+```
+
+สคริปต์แก้ `MQTT_URL` และ `RLGL_MQTT_HOST` ใน `.env`, `PI_HOST` ใน `rlgl-dashboard/config.js` แล้วรีสตาร์ต Telegraf ให้ ส่วน ESP ต้องแก้ `MQTT_HOST` แล้วแฟลชเอง
+
 ## แก้ dashboard
 
 แก้ `infra/grafana/make_dashboard.py` แล้วรันใหม่ ไฟล์ `dashboards/rlgl.json` ถูกสร้างจากสคริปต์นี้
