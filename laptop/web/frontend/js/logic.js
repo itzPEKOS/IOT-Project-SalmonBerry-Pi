@@ -145,8 +145,8 @@ export class Recorder {
     } else if (topic === DISTANCE && playing && isNumber(payload.distance_cm)) {
       this.samples.distance.push({ t: this.at(nowMs), cm: payload.distance_cm });
     } else if (topic === VISION && playing && this.lastState === "RED_LIGHT") {
-      // การขยับเทียบเกณฑ์: contract ใช้ score_ratio, pi_client.py ส่งชื่อ score
-      const ratio = isNumber(payload.score_ratio) ? payload.score_ratio : payload.score;
+      // การขยับเทียบเกณฑ์: contract = score_ratio, pi_client.py เดิม = score, pi_client.py 28 พ.ย. = motion_score
+      const ratio = [payload.score_ratio, payload.score, payload.motion_score].find(isNumber);
       if (isNumber(ratio)) this.samples.motion.push({ t: this.at(nowMs), v: ratio });
     }
   }

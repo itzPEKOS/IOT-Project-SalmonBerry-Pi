@@ -304,7 +304,7 @@ const HOW = {
   rlgl: [
     ["heart", "Clip the heart sensor on your finger and wear the wristband"],
     ["runner", "Stand on the START mark and wait for GREEN"],
-    ["camera", "Walk on GREEN · freeze when the camera turns to you (RED)"],
+    ["camera", "Walk on GREEN · freeze on RED (the operator switches the light)"],
     ["flag", "Touch the metal plate at the finish to win"],
   ],
   sniper: [
@@ -382,7 +382,8 @@ const SENSOR_ROWS = [
   ["imu", "Wrist motion (MPU6050)", "ESP32 #1 · gyro + accelerometer"],
   ["heart", "Heart rate (KY-039)", "ESP32 #1 · finger sensor"],
   ["camera", "Camera (MediaPipe)", "Pi 5 · sees your whole body"],
-  ["distance", "Distance (ultrasonic)", "Pi 5 · HC-SR04"],
+  ["distance", "Distance (ultrasonic)", "ESP32 finish · HC-SR04"],
+  ["touch", "Finish touch", "ESP32 finish · metal plate"],
   ["station", "Joystick + servo", "ESP32 #2 · camera station"],
 ];
 const CHECK_CLASS = { ok: "ok", wait: "wait", fail: "bad", off: "off" };
@@ -417,6 +418,7 @@ function renderCalibrate() {
     heart: { ok: num(bpm) ? `${bpm} BPM` : "OK", wait: "...", fail: "NO PULSE", off: "--" },
     camera: { ok: "OK", wait: "...", fail: "NOT SEEN", off: "--" },
     distance: { ok: num(distance) ? `${(distance / 100).toFixed(2)} m` : "OK", wait: "...", fail: "NO DATA", off: "NOT USED" },
+    touch: { ok: "ONLINE", wait: "...", fail: "OFFLINE", off: "NOT USED" },
     station: { ok: "ONLINE", wait: "...", fail: "OFFLINE", off: "NOT USED" },
   };
   $("#checks").innerHTML = SENSOR_ROWS.map(([key, title, text]) => {
@@ -468,7 +470,7 @@ function renderCountdown(section) {
 // ---- 3) ไฟเขียว/แดง
 const BANNERS = {
   GREEN_LIGHT: ["green", "on-g", "GREEN LIGHT", "Walk to the finish"],
-  TRANSITION: ["yellow", "on-y", "TURNING…", "Get ready to freeze"],
+  TRANSITION: ["yellow", "on-y", "SLOW DOWN!", "Red light in a moment · get ready to freeze"],
   RED_LIGHT: ["red", "on-r", "RED LIGHT", "Freeze! The camera is watching"],
   COUNTDOWN: ["grey", "", "GET READY", "The round starts in a moment"],
 };

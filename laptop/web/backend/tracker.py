@@ -44,9 +44,12 @@ class RoundNumbers:
 
 
 def motion_ratio(payload):
-    """การขยับเทียบเกณฑ์ (1.0 = ถึงเกณฑ์): contract ใช้ score_ratio, pi_client.py ส่งชื่อ score"""
-    value = payload.get("score_ratio")
-    return value if is_number(value) else payload.get("score")
+    """การขยับเทียบเกณฑ์ (1.0 = ถึงเกณฑ์): contract ใช้ score_ratio, pi_client.py เดิมใช้ score
+    และ pi_client.py 28 พ.ย. ใช้ motion_score"""
+    for key in ("score_ratio", "score", "motion_score"):
+        if is_number(payload.get(key)):
+            return payload[key]
+    return None
 
 
 def motion_raw(payload):

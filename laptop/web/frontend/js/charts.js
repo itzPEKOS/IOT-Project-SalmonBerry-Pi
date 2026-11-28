@@ -133,7 +133,7 @@ export function timelineChart(canvas, timeline, trackCm, gyroLimit = 50) {
   ctx.beginPath(); ctx.moveTo(left, yg(gyroLimit)); ctx.lineTo(w - right, yg(gyroLimit)); ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = C.muted;
-  ctx.fillText(`${gyroLimit}°/s`, left + 4, yg(gyroLimit) - 7);
+  ctx.fillText(`${gyroLimit}°/s`, w - right - 64, yg(gyroLimit) - 7);
   if (!gyro.length) ctx.fillText("NO WRIST DATA", left + 4, wr.y + wr.h / 2);
 
   // การขยับจากกล้อง (MediaPipe บน Pi) เทียบเกณฑ์ เฉพาะตอนไฟแดง (1.0 = แพ้)

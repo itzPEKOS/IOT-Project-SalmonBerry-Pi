@@ -237,6 +237,16 @@ def test_the_pi_field_names_score_and_raw_are_used_too():
     assert summary["red_motion_max"] == 0.027
 
 
+def test_closest_call_also_reads_motion_score_from_the_new_pi_client():
+    # pi_client.py (28 พ.ย.) ส่งการขยับเทียบเกณฑ์ในชื่อ motion_score
+    def frame(value):
+        return "rlgl/gateway/vision", {"event": "frame", "motion_score": value, "valid": 1}
+
+    out = feed(GameTracker(), state("RED_LIGHT"), frame(0.42), frame(0.81), frame(0.3), result())
+    assert out[0][1]["closest_call"] == 0.81
+
+
 def test_distance_and_closest_call_are_left_out_without_data():
-    summary = feed(GameTracker(), state("RED_LIGHT"), vision(0.2), result())[0][1]
+    no_motion = ("rlgl/gateway/vision", {"event": "heartbeat", "fps": 15})
+    summary = feed(GameTracker(), state("RED_LIGHT"), no_motion, result())[0][1]
     assert "distance_cm" not in summary and "closest_call" not in summary

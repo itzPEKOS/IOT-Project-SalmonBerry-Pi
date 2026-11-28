@@ -7,7 +7,8 @@
 - ข้อความจาก `game`, `uploader`, `backend` มี `round_id` (ใช้ได้เฉพาะ `A-Z a-z 0-9 _ -` และต้องไม่ซ้ำกันในแต่ละรอบ)
   game engine (`laptop/engine`) ส่ง `round_id` เป็น**ตัวเลข** (epoch วินาที) เพราะ `pi_client.py` จัดรูปแบบด้วย `:03d` backend แปลงเป็นข้อความเอง
 - ค่าที่เป็นจริง/เท็จ ให้ส่งเป็น `1` / `0`
-- ชื่อ state: `IDLE`, `CALIBRATE`, `GREEN_LIGHT`, `TRANSITION`, `RED_LIGHT`, `GAME_OVER`, `WIN`
+- ชื่อ state: `IDLE`, `CALIBRATE`, `CALIBRATE_FAILED`, `READY`, `COUNTDOWN`, `GREEN_LIGHT`, `TRANSITION`, `RED_LIGHT`, `SNIPER`, `GAME_OVER`, `WIN`
+  ลำดับ: `IDLE` → `CALIBRATE` → `READY` (หรือ `CALIBRATE_FAILED` ถ้า sensor ไม่ส่งข้อมูล) → `COUNTDOWN` → `GREEN_LIGHT` … ดูรายละเอียดใน `laptop/engine/README.md`
 
 ## Topic และ field
 
@@ -21,7 +22,7 @@
 | `rlgl/gateway/distance` | finish-01 (ESP32) | 0 | `distance_cm` (ไม่มี field นี้เมื่อวัดไม่ได้), `valid` (1/0), `round_id` ส่ง 10 Hz ตอนเล่น, 1 Hz ตอนว่าง |
 | `rlgl/gateway/vision` | vision | 0 | `motion_score`, `confidence` (0-1), `fps`, `inference_ms` |
 | `rlgl/gateway/replay` | vision | 1 | ส่งหลังอัปโหลดคลิปของรอบสำเร็จ: `round_id`, `video_url`, `moved_at` (วินาทีในคลิปที่กล้องจับได้ว่าขยับ, `null` = ไม่ได้แพ้เพราะกล้อง), `ended_at` (วินาทีในคลิปที่เกมจบ), `duration`, `result`, `reason`, `part`, `joint`, `motion_score`, `clip_started_at`, `moved_ts` (epoch ms) หน้าเว็บใช้ `video.currentTime = moved_at` กระโดดไปจังหวะที่ขยับได้ |
-| `rlgl/game/state` | game | 1 / retain | `round_id`, `state`, `remaining_s` ส่งเมื่อเปลี่ยน และทุก 1 วินาทีระหว่างเล่น |
+| `rlgl/game/state` | game | 1 / retain | `round_id`, `state`, `remaining_s` ส่งเมื่อเปลี่ยน และทุก 1 วินาทีระหว่างเล่น `COUNTDOWN` เพิ่ม `starts_in_s` (วินาทีจนถึงไฟเขียว), `intro_s`, `count_s` และ `CALIBRATE_FAILED` เพิ่ม `failed` (ชื่อ sensor คั่นด้วย `,`) |
 | `rlgl/game/result` | game | 1 | `round_id`, `result`, `reason`, `started_at`, `ended_at` (epoch ms), `duration_s` |
 | `rlgl/game/media` | backend | 1 | `round_id`, `status` = `ready`, `video_url` |
 | `rlgl/game/summary` | backend | 1 | `round_id`, `bpm_avg`, `bpm_max`, `red_motion_max`, `red_acc_peak_max`, `red_light_count`, `distance_cm` (ค่าสุดท้ายตอนเล่น), `finish_state` (ไฟตอนแตะเส้นชัย), `closest_call` (ค่าที่ไม่มีข้อมูลจะไม่ถูกส่ง; `red_acc_peak_max` ไม่นับ 200 ms สุดท้ายก่อนเปลี่ยนเป็นไฟเขียว) |
@@ -32,7 +33,7 @@
 
 \* ESP32 ใช้ PubSubClient ซึ่ง publish ได้แค่ QoS 0 ถ้า MQTT หลุดตอนแตะ `finish-01` จะเก็บข้อความไว้แล้วส่งทันทีที่ต่อได้
 
-**เริ่มรอบ:** ESP2 ส่ง `rlgl/station/button` `{"pressed": 1}` (ปุ่ม START บน joystick) หรือส่ง `rlgl/cmd/game` `{"cmd": "start"}` (`"abort"` = ยกเลิกรอบ) game engine เริ่มรอบเมื่อ state เป็น `IDLE`, `WIN` หรือ `GAME_OVER`
+**เริ่มรอบ:** ESP2 ส่ง `rlgl/station/button` `{"pressed": 1}` (ปุ่ม START บน joystick) หรือส่ง `rlgl/cmd/game` `{"cmd": "start"}` (`"abort"` = ยกเลิกรอบ) ปุ่มเดียวใช้ทั้งรอบ: กดตอน `IDLE` / `WIN` / `GAME_OVER` = เริ่ม calibrate, กดตอน `READY` = เริ่มนับถอยหลัง, กดตอน `CALIBRATE_FAILED` = calibrate ใหม่ (รอบเดิม) และระหว่างเล่นเกม 1: กดตอน `GREEN_LIGHT` = เตือน (`TRANSITION` 1.5 วิ) แล้วเป็น `RED_LIGHT`, กดตอน `RED_LIGHT` = กลับ `GREEN_LIGHT` (ไฟไม่สลับเองตามเวลา การหมุน joystick ใช้เฉพาะเกม 2) `rlgl/cmd/game` รับ `"red"` / `"green"` ด้วย
 **หลังจบรอบ:** state `WIN` / `GAME_OVER` ค้างไว้จนรอบถัดไปเริ่ม (หน้าเว็บแสดงผลจนกว่าจะกด PLAY AGAIN) ส่วน `ABORTED` กลับ `IDLE` ทันที
 **ลำดับ:** game engine ส่ง `rlgl/game/result` ก่อน state สุดท้ายเสมอ และใส่ `cause`, `part`, `score` (ชื่อที่ `pi_client.py` อ่าน) ซ้ำกับ `reason`, `caught_part`, `caught_score_ratio`
 
@@ -50,7 +51,7 @@ backend ตั้ง LWT ให้ `backend-01` เท่านั้น game en
 | `rlgl/game/result` | `caught_red_s` | โดนจับหลังเริ่มไฟแดงกี่วินาที |
 | `rlgl/game/result` | `caught_score_ratio` | คะแนนสูงสุดตอนโดนจับ เทียบเกณฑ์ |
 | `rlgl/game/result` | `bpm_rest` | ชีพจรขณะพักจากช่วง calibrate |
-| `rlgl/game/calibration` (topic ใหม่, game ส่ง) | `round_id`, `progress` (0-1), `player_detected` (1/0), `keypoints`, `camera_baseline_s`, `imu_baseline_s`, `baseline_s` | ส่งระหว่าง `CALIBRATE` ประมาณ 2 ครั้ง/วินาที ใช้ทำหน้า calibrate |
+| `rlgl/game/calibration` (game ส่ง) | `round_id`, `progress` (0-1), `player_detected` (1/0), `camera_baseline_s`, `imu_baseline_s`, `baseline_s`, `done` (1/0), `required` (sensor ที่บังคับ คั่นด้วย `,`), `check_imu`, `check_heart`, `check_camera`, `check_distance`, `check_touch`, `check_station` (`ok` / `wait` / `fail` / `off`) และเมื่อ `done` = 1 มี `ok` (1/0), `failed` | ส่งระหว่าง `CALIBRATE` 2 ครั้ง/วินาที และครั้งสุดท้ายตอนเช็กเสร็จ ใช้ทำหน้า calibrate |
 
 ## โหมด Sniper (ข้อเสนอ: คนทำ Pi ยังไม่ได้ตกลง)
 

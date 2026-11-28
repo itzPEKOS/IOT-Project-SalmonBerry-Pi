@@ -113,8 +113,8 @@ series("ระยะผู้เล่น", "distance", "distance_cm", 12, 5, na
 series("ข้อมือ: acc_peak (เส้นเกณฑ์ตัวอย่าง 0.3 g)", "imu", "acc_peak", 0, 12, fn="max", limit=0.3, name="acc_peak (g)")
 series("ข้อมือ: gyro_rms", "imu", "gyro_rms", 12, 12, fn="max", name="gyro_rms (deg/s)")
 # การขยับเทียบเกณฑ์ที่ Pi ปรับเองตอน calibrate (1.0 = ถึงเกณฑ์) ส่งเฉพาะช่วงไฟแดง
-# pi_client.py ใน repo ส่งชื่อ score ส่วน contract ใช้ score_ratio จึงรับทั้งสองชื่อ
-series("กล้อง: การขยับเทียบเกณฑ์ตอนไฟแดง (เส้นแดง 1.0 = เกณฑ์ของ Pi)", "vision", ("score", "score_ratio"), 0, 19,
+# แต่ละรุ่นของสคริปต์ Pi ใช้ชื่อต่างกัน: contract = score_ratio, pi_client.py เดิม = score, 28 พ.ย. = motion_score
+series("กล้อง: การขยับเทียบเกณฑ์ตอนไฟแดง (เส้นแดง 1.0 = เกณฑ์ของ Pi)", "vision", ("score", "score_ratio", "motion_score"), 0, 19,
        fn="max", limit=1.0, name="score (× เกณฑ์)",
        empty="ยังไม่มีไฟแดงในช่วงเวลานี้ (Pi ส่งค่านี้เฉพาะตอนไฟแดง)")
 series("กล้อง: FPS", "vision", "fps", 12, 19, name="fps")

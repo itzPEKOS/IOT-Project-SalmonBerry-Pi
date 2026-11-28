@@ -19,8 +19,9 @@ class Clock:
 
 def make(**overrides):
     # test ทั่วไปไม่บังคับ sensor (sensors=()) test เรื่องเช็ก sensor ระบุเอง
+    # และใช้ไฟสลับเองตามเวลา (lights="auto") test ของการกดปุ่มเปลี่ยนไฟระบุ lights="button" เอง
     settings = dict(calib_s=5.0, green_s=(4.0, 4.0), transition_s=1.5, red_s=(3.0, 3.0), limit_s=60.0,
-                    intro_s=2.0, count_s=3.0, sensors=())
+                    intro_s=2.0, count_s=3.0, sensors=(), lights="auto")
     settings.update(overrides)
     clock, out = Clock(), []
     engine = Engine(Config(**settings), publish=lambda topic, body, qos=0, retain=False: out.append(
@@ -206,7 +207,7 @@ def test_calibration_passes_when_every_required_sensor_sends_data():
     assert (final["done"], final["ok"], final["failed"]) == (1, 1, "")
     assert (final["check_imu"], final["check_heart"], final["check_camera"]) == ("ok", "ok", "ok")
     # sensor ที่ไม่บังคับ: off ถ้าไม่มีข้อมูล
-    assert (final["check_distance"], final["check_station"]) == ("off", "off")
+    assert (final["check_distance"], final["check_touch"], final["check_station"]) == ("off", "off", "off")
 
 
 def test_live_checks_show_wait_until_a_sensor_has_sent_enough():
@@ -256,6 +257,18 @@ def test_distance_and_station_can_be_required_later():
     engine.command("start")
     run_with_sensors(engine, clock, 5.05, distance=290)
     assert engine.state == "READY"
+
+
+def test_the_finish_esp_counts_as_the_touch_sensor():
+    engine, clock, out = make(sensors=("imu", "heart", "camera", "touch"))
+    start(engine, clock, out)
+    run_with_sensors(engine, clock, 5.05)
+    assert sent(out, CALIBRATION)[-1]["check_touch"] == "fail"
+    online(engine, "finish-01")
+    engine.command("start")
+    run_with_sensors(engine, clock, 5.05)
+    assert engine.state == "READY"
+    assert sent(out, CALIBRATION)[-1]["check_touch"] == "ok"
 
 
 # ---------- READY และนับถอยหลัง ----------
@@ -319,6 +332,17 @@ def test_camera_movement_on_red_is_game_over_with_the_body_part():
     # ชื่อ field ที่ pi_client.py อ่านตอนทำคลิป
     assert (body["cause"], body["part"], body["score"]) == ("camera", "left_arm", 1.37)
     assert states(out)[-1] == "GAME_OVER"
+
+
+def test_the_new_pi_client_sends_the_ratio_as_motion_score():
+    # pi_client.py (28 พ.ย.) ส่ง motion_score = การขยับเทียบเกณฑ์ (1.0 = เกณฑ์)
+    engine, clock, out = make()
+    round_id = to_red(engine, clock, out)
+    engine.message(VISION, {"event": "moved", "round_id": round_id, "part": "right_leg", "motion_score": 1.528,
+                            "moved": 1, "valid": 1})
+    engine.tick()
+    body = result(out)
+    assert (body["caught_part"], body["caught_score_ratio"], body["score"]) == ("right_leg", 1.53, 1.53)
 
 
 def test_the_result_is_sent_before_the_final_state():
@@ -555,3 +579,95 @@ def test_the_sniper_clock_runs_out():
     engine, clock, out, _ = sniper_round(limit_s=20.0)
     run(engine, clock, 20.1)
     assert (result(out)["result"], result(out)["reason"]) == ("GAME_OVER", "timeout")
+
+
+# ---------- เกม 1: คนคุมกดปุ่ม joystick เปลี่ยนไฟ ----------
+
+def press(engine):
+    """กดปุ่ม START บน joystick (ESP2) หนึ่งครั้ง"""
+    engine.message(BUTTON, {"pressed": 1})
+
+
+def test_lights_change_by_the_joystick_button_by_default():
+    assert Config().lights == "button"
+
+
+def test_green_stays_until_the_button_then_yellow_then_red_until_the_next_press():
+    engine, clock, out = make(lights="button", transition_s=1.5)
+    to_green(engine, clock, out)
+    run(engine, clock, 20.0)
+    assert engine.state == "GREEN_LIGHT"
+    press(engine)
+    assert engine.state == "TRANSITION"  # เตือน 1.5 วิ ให้ผู้เล่นหยุดก่อน
+    run(engine, clock, 1.55)
+    assert engine.state == "RED_LIGHT"
+    run(engine, clock, 20.0)
+    assert engine.state == "RED_LIGHT"
+    press(engine)
+    assert engine.state == "GREEN_LIGHT"
+    assert states(out)[-4:] == ["GREEN_LIGHT", "TRANSITION", "RED_LIGHT", "GREEN_LIGHT"]
+
+
+def test_a_press_during_the_yellow_warning_is_ignored():
+    engine, clock, out = make(lights="button")
+    to_green(engine, clock, out)
+    press(engine)
+    ok, _ = engine.command("start")
+    assert not ok and engine.state == "TRANSITION"
+
+
+def test_red_by_button_is_judged_by_camera_and_wrist():
+    engine, clock, out = make(lights="button")
+    round_id = to_green(engine, clock, out)
+    press(engine)
+    run(engine, clock, 2.5)
+    assert engine.state == "RED_LIGHT"
+    engine.message(VISION, {"event": "moved", "round_id": round_id, "part": "head", "motion_score": 1.2})
+    engine.tick()
+    assert (result(out)["result"], result(out)["reason"]) == ("GAME_OVER", "camera")
+
+
+def test_the_30_second_limit_still_applies_with_the_button():
+    engine, clock, out = make(lights="button", limit_s=30.0)
+    to_green(engine, clock, out)
+    run(engine, clock, 30.1)
+    assert (result(out)["result"], result(out)["reason"]) == ("GAME_OVER", "timeout")
+
+
+def test_keyboard_r_and_g_do_the_same_as_the_button():
+    engine, clock, out = make(lights="button")
+    to_green(engine, clock, out)
+    assert engine.command("red")[0]
+    assert engine.state == "TRANSITION"
+    run(engine, clock, 1.55)
+    assert not engine.command("red")[0] or engine.state == "RED_LIGHT"
+    assert engine.command("green")[0]
+    assert engine.state == "GREEN_LIGHT"
+    engine.message(CMD, {"cmd": "red"})
+    assert engine.state == "TRANSITION"
+
+
+def test_r_and_g_only_work_with_button_lights_while_playing():
+    engine, clock, out = make(lights="auto")
+    to_green(engine, clock, out)
+    assert not engine.command("red")[0]
+    engine, clock, out = make(lights="button")
+    start(engine, clock, out)
+    assert not engine.command("red")[0]  # ยัง calibrate อยู่
+    assert engine.state == "CALIBRATE"
+
+
+def test_the_button_does_not_change_anything_in_sniper():
+    engine, clock, out, _ = sniper_round(lights="button")
+    press(engine)
+    assert engine.state == "SNIPER"
+
+
+def test_camera_only_ignores_the_wrist():
+    engine, clock, out = make(judge=("camera",))
+    to_red(engine, clock, out)
+    run(engine, clock, 0.5)
+    for _ in range(5):
+        engine.message(IMU, {"acc_peak": 0.9, "gyro_rms": 150})
+    engine.tick()
+    assert sent(out, RESULT) == []

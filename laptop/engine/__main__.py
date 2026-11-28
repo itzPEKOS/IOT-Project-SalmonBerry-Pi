@@ -5,8 +5,10 @@
     python -m engine --host 172.20.10.2
     python -m engine --skip-checks     เริ่มรอบได้แม้อุปกรณ์และ sensor ยังไม่ครบ (ไว้ทดสอบ)
     python -m engine --sensors imu,camera   ไม่บังคับชีพจร (ถ้า KY-039 วัดไม่ได้)
+    python -m engine --camera-only     ทดสอบกล้อง: ใช้กล้องตัดสินอย่างเดียว ไม่ต้องรอข้อมือ
+    python -m engine --auto-lights     ไฟสลับเองตามเวลาสุ่ม (ไม่ต้องกดปุ่มเปลี่ยนไฟ)
 
-คำสั่งในหน้าต่างนี้: Enter = calibrate (ครั้งแรก) / เริ่มเล่น (ครั้งที่สอง), a = ยกเลิกรอบ, t = จำลองแตะเส้นชัย, s = ดูสถานะอุปกรณ์, q = ออก
+คำสั่งในหน้าต่างนี้: Enter = ปุ่ม joystick (calibrate / เริ่มเล่น / ระหว่างเล่น: สลับไฟ), a = ยกเลิกรอบ, t = จำลองแตะเส้นชัย, s = ดูสถานะอุปกรณ์, q = ออก
 """
 import argparse
 import json
@@ -47,15 +49,21 @@ def parse_args(env):
     p.add_argument("--red", type=float, nargs=2, default=(3.0, 5.0), metavar=("MIN", "MAX"))
     p.add_argument("--transition", type=float, default=1.5, help="วินาทีที่กล้องหัน (ยังไม่จับ)")
     p.add_argument("--limit", type=float, default=30.0, help="เวลาเล่นต่อรอบ (วินาที)")
+    p.add_argument("--auto-lights", action="store_true",
+                   help="เกม 1: ไฟสลับเองตามเวลาสุ่ม (ค่าเริ่มต้น = คนคุมกดปุ่ม joystick / Enter เปลี่ยนไฟ)")
+    p.add_argument("--camera-only", action="store_true",
+                   help="ใช้กล้องอย่างเดียว: ตัดสินจากกล้อง, calibrate เช็กแค่กล้อง, ไม่ต้องรอข้อมือ online")
     p.add_argument("--intro", type=float, default=2.0, help="วินาทีของ animation ก่อนนับถอยหลัง")
     p.add_argument("--count", type=float, default=3.0, help="นับถอยหลังกี่วินาที")
-    p.add_argument("--sensors", default="imu,heart,camera",
+    p.add_argument("--sensors", default=None,
                    help=f"sensor ที่ต้องใช้ได้ตอน calibrate คั่นด้วย , จาก {','.join(SENSORS)} (ใส่ none = ไม่เช็ก)")
     p.add_argument("--imu-acc", type=float, default=0.3, help="ไฟแดง: acc_peak (g) เกินนี้ = ขยับ")
     p.add_argument("--imu-gyro", type=float, default=50.0, help="ไฟแดง: gyro_rms (deg/s) เกินนี้ = ขยับ")
     p.add_argument("--skip-checks", action="store_true", help="ไม่ต้องรอ web/backend/Pi/ข้อมือ online")
     p.add_argument("--no-console", action="store_true", help="ไม่รับคำสั่งจากคีย์บอร์ด (เริ่มรอบด้วยปุ่มบนสถานีเท่านั้น)")
     args = p.parse_args()
+    if args.sensors is None:
+        args.sensors = "camera" if args.camera_only else "imu,heart,camera"
     names = [] if args.sensors.strip().lower() == "none" else [n.strip().lower() for n in args.sensors.split(",") if n.strip()]
     unknown = [n for n in names if n not in SENSORS]
     if unknown:
@@ -78,7 +86,10 @@ class Runner:
                         transition_s=args.transition, limit_s=args.limit, imu_acc_g=args.imu_acc,
                         imu_gyro_dps=args.imu_gyro, intro_s=args.intro, count_s=args.count,
                         sensors=() if args.skip_checks else args.sensors,
-                        require=() if args.skip_checks else Config.require)
+                        require=() if args.skip_checks else
+                        tuple(d for d in Config.require if d != "wrist-01") if args.camera_only else Config.require,
+                        lights="auto" if args.auto_lights else "button",
+                        judge=("camera",) if args.camera_only else Config.judge)
         self.engine = Engine(config, publish=self.publish)
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"{DEVICE_ID}-{os.getpid()}")
         if env.get("MQTT_USER"):
@@ -137,7 +148,7 @@ class Runner:
     # ---------- คำสั่งจากคีย์บอร์ด ----------
 
     def console(self):
-        commands = {"": "start", "a": "abort", "t": "touch", "s": "status", "q": "quit"}
+        commands = {"": "start", "g": "green", "r": "red", "a": "abort", "t": "touch", "s": "status", "q": "quit"}
         while self.running:
             try:
                 line = input().strip().lower()
@@ -146,7 +157,7 @@ class Runner:
             if line in commands:
                 self.inbox.put(("command", commands[line], None))
             else:
-                print("Enter = calibrate / เริ่มเล่น, a = ยกเลิก, t = แตะเส้นชัย, s = สถานะอุปกรณ์, q = ออก", flush=True)
+                print("Enter = ปุ่ม joystick (calibrate / เริ่มเล่น / สลับไฟ), r = ไฟแดง, g = ไฟเขียว, a = ยกเลิก, t = แตะเส้นชัย, s = สถานะ, q = ออก", flush=True)
 
     def _run_command(self, name):
         if name == "quit":
@@ -170,7 +181,7 @@ class Runner:
             if topic == BUTTON and payload.get("pressed"):
                 self._run_command("start")
                 return
-            if topic == CMD and payload.get("cmd") in ("start", "abort", "touch"):
+            if topic == CMD and payload.get("cmd") in ("start", "abort", "touch", "green", "red"):
                 self._run_command(payload["cmd"])
                 return
             if topic.startswith(STATUS_PREFIX):
@@ -196,7 +207,18 @@ class Runner:
         self.client.loop_start()
         if console:
             threading.Thread(target=self.console, daemon=True).start()
-            print("Enter = calibrate / เริ่มเล่น, a = ยกเลิก, t = แตะเส้นชัย, s = สถานะอุปกรณ์, q = ออก (หรือ Ctrl+C)", flush=True)
+            print("Enter = ปุ่ม joystick (calibrate / เริ่มเล่น / สลับไฟ), r = ไฟแดง, g = ไฟเขียว, a = ยกเลิก, t = แตะเส้นชัย, s = สถานะ, q = ออก (หรือ Ctrl+C)", flush=True)
+            c = self.engine.c
+            mode = []
+            if c.lights == "button":
+                mode.append(f"เปลี่ยนไฟด้วยปุ่ม: เขียว ─กด→ เตือน {c.transition_s:.1f} วิ → แดง ─กด→ เขียว")
+            else:
+                mode.append("ไฟสลับเองตามเวลา")
+            if c.judge == ("camera",):
+                mode.append("ตัดสินจากกล้องอย่างเดียว")
+            mode.append(f"เช็ก sensor: {', '.join(c.sensors) or 'ไม่เช็ก'}")
+            mode.append(f"เวลาเล่น {c.limit_s:.0f} วิ")
+            say(" | ".join(mode))
         try:
             while self.running:
                 deadline = time.monotonic() + TICK_S

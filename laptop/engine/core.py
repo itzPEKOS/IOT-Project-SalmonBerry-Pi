@@ -5,6 +5,8 @@
                   └─ ไม่ผ่าน → CALIBRATE_FAILED (กดอีกครั้ง = calibrate ใหม่ รอบเดิม)
 กดปุ่มครั้งที่สอง: READY → COUNTDOWN (animation + นับ 3-2-1) → เล่น
 โหมด rlgl:   GREEN_LIGHT → TRANSITION → RED_LIGHT → GREEN_LIGHT … → WIN / GAME_OVER
+             ค่าเริ่มต้น: คนคุมกดปุ่ม joystick เปลี่ยนไฟ (เขียว ─กด→ เตือน 1.5 วิ → แดง ─กด→ เขียว)
+             lights="auto": สลับเองตามเวลาสุ่ม
 โหมด sniper: SNIPER → WIN / GAME_OVER
 WIN / GAME_OVER ค้างจนรอบถัดไปเริ่ม ยกเลิกรอบ (ABORTED) แล้วกลับ IDLE ทันที
 
@@ -33,9 +35,11 @@ MODES = ("rlgl", "sniper")
 # สคริปต์บน Pi รายงานสถานะเป็น rlgl/status/pi (pi_client.py) ตาม contract คือ gateway-01 รับทั้งสองชื่อ
 CAMERA_IDS = ("pi", "gateway-01")
 STATION_ID = "station-01"
+FINISH_ID = "finish-01"  # ESP ที่เส้นชัย: touch + ultrasonic
 DEFAULT_REQUIRE = ("backend-01", "web-01", "pi", "wrist-01")
-# sensor ที่เช็กตอน calibrate: imu, heart = ESP ข้อมือ / camera, distance = Pi / station = ESP สถานี (joystick, servo)
-SENSORS = ("imu", "heart", "camera", "distance", "station")
+# sensor ที่เช็กตอน calibrate: imu, heart = ESP ข้อมือ / camera = Pi / distance, touch = ESP เส้นชัย (finish-01)
+# station = ESP สถานี (joystick, servo)
+SENSORS = ("imu", "heart", "camera", "distance", "touch", "station")
 PLAYING = ("GREEN_LIGHT", "TRANSITION", "RED_LIGHT", "SNIPER")
 ACTIVE = ("CALIBRATE", "CALIBRATE_FAILED", "READY", "COUNTDOWN", *PLAYING)
 BPM_MIN, BPM_MAX = 45, 180
@@ -63,10 +67,23 @@ class Config:
     sensors: tuple = ("imu", "heart", "camera")  # sensor ที่ต้องส่งข้อมูลจริงตอน calibrate ถึงจะเล่นได้
     imu_min_samples: int = 20        # calibrate: ต้องได้ IMU อย่างน้อยกี่ค่า
     camera_fresh_s: float = 2.0      # calibrate: กล้องต้องเห็นผู้เล่นภายในกี่วินาทีล่าสุด
+    # เกม 1: "button" = คนคุมกดปุ่ม joystick เปลี่ยนไฟ (เขียว → เตือน transition_s → แดง, แดง → เขียว)
+    #         "auto" = สลับเองตามเวลาสุ่ม green_s / red_s
+    lights: str = "button"
+    judge: tuple = ("camera", "imu")  # ใช้อะไรตัดสินการขยับตอนไฟแดง ("camera",) = กล้องอย่างเดียว
 
 
 def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def motion_ratio(payload):
+    """การขยับเทียบเกณฑ์ (1.0 = เกณฑ์) แต่ละรุ่นของสคริปต์ Pi ใช้ชื่อต่างกัน:
+    contract = score_ratio, pi_client.py เดิม = score, pi_client.py 28 พ.ย. = motion_score"""
+    for key in ("score_ratio", "score", "motion_score"):
+        if _number(payload.get(key)):
+            return payload[key]
+    return None
 
 
 class Engine:
@@ -118,7 +135,7 @@ class Engine:
             if payload.get("pressed"):
                 self.command("start")
         elif topic == CMD:
-            if payload.get("cmd") in ("start", "abort", "touch"):
+            if payload.get("cmd") in ("start", "abort", "touch", "green", "red"):
                 self.command(payload["cmd"])
         elif topic == HEARTRATE:
             bpm = payload.get("bpm")
@@ -157,7 +174,7 @@ class Engine:
         if payload.get("player_seen") or payload.get("valid"):
             self.player_seen_at = now
         if (payload.get("event") == "moved" and self.state == "RED_LIGHT" and self._same_round(payload)
-                and self.caught is None):
+                and self.caught is None and "camera" in self.c.judge):
             self.caught = payload
 
     def _on_imu(self, payload, now):
@@ -168,7 +185,7 @@ class Engine:
         acc = acc if _number(acc) else 0.0
         gyro = gyro if _number(gyro) else 0.0
         if self.state == "RED_LIGHT":
-            if now - self.red_t0 < self.c.imu_grace_s:
+            if "imu" not in self.c.judge or now - self.red_t0 < self.c.imu_grace_s:
                 return
             over = acc > self.c.imu_acc_g or gyro > self.c.imu_gyro_dps
             self.imu_streak = self.imu_streak + 1 if over else 0
@@ -217,6 +234,8 @@ class Engine:
             return self.player_seen_at is not None and now - self.player_seen_at <= self.c.camera_fresh_s
         if name == "distance":
             return self.distance_count > 0
+        if name == "touch":  # touch ส่งข้อมูลเฉพาะตอนแตะ จึงเช็กได้แค่ว่า ESP เส้นชัย online
+            return bool(self.devices.get(FINISH_ID))
         if name == "station":
             return bool(self.devices.get(STATION_ID))
         return False
@@ -254,6 +273,8 @@ class Engine:
         if name == "touch":
             self.message(FINISH, {"touched": 1})
             return True, self.round_id
+        if name in ("green", "red"):
+            return self._light_key(name)
         return False, f"ไม่รู้จักคำสั่ง {name}"
 
     def _press(self):
@@ -261,6 +282,8 @@ class Engine:
         if self.state == "READY":
             self._set("COUNTDOWN", self.c.intro_s + self.c.count_s)
             return True, self.round_id
+        if self.state in ("GREEN_LIGHT", "TRANSITION", "RED_LIGHT") and self._button_lights():
+            return self._toggle_light()
         if self.state not in ("IDLE", "WIN", "GAME_OVER", "CALIBRATE_FAILED"):
             return False, f"กำลัง {self.state} รอบ {self.round_id} อยู่"
         missing = self.missing()
@@ -270,6 +293,31 @@ class Engine:
             self._calibrate()  # รอบเดิม: ยังไม่ได้เริ่มเล่น
         else:
             self._begin()
+        return True, self.round_id
+
+    def _button_lights(self):
+        return self.c.lights == "button" and self.round_mode == "rlgl"
+
+    def _toggle_light(self):
+        """ปุ่ม joystick ระหว่างเล่นเกม 1: เขียว → เตือน (เหลือง) → แดง, แดง → เขียว"""
+        if self.state == "GREEN_LIGHT":
+            self._set("TRANSITION", self.c.transition_s)  # หมดเวลาแล้วเป็นแดงเอง (_next_phase)
+            return True, self.round_id
+        if self.state == "RED_LIGHT":
+            self._set("GREEN_LIGHT")
+            return True, self.round_id
+        return False, "กำลังเตือนเปลี่ยนเป็นไฟแดง รอสักครู่"
+
+    def _light_key(self, name):
+        """ปุ่ม r / g บนคีย์บอร์ด (หรือ rlgl/cmd/game) ใช้แทนปุ่ม joystick แบบระบุสีได้"""
+        if not self._button_lights():
+            return False, "สลับไฟเองได้เฉพาะเกม 1 ที่ใช้ปุ่มเปลี่ยนไฟ (ไม่ได้เปิดด้วย --auto-lights)"
+        if self.state not in ("GREEN_LIGHT", "TRANSITION", "RED_LIGHT"):
+            return False, f"ยังไม่ได้เริ่มเล่น (state ตอนนี้ {self.state})"
+        if name == "red":
+            return self._toggle_light() if self.state == "GREEN_LIGHT" else (True, self.round_id)
+        if self.state != "GREEN_LIGHT":
+            self._set("GREEN_LIGHT")
         return True, self.round_id
 
     def abort(self, reason):
@@ -353,12 +401,14 @@ class Engine:
             self.play_t0 = self.clock()
             if self.round_mode == "sniper":
                 self._set("SNIPER")
+            elif self._button_lights():
+                self._set("GREEN_LIGHT")  # ค้างไว้จนคนคุมกดปุ่ม
             else:
                 self._set("GREEN_LIGHT", self.rng.uniform(*self.c.green_s))
         elif self.state == "GREEN_LIGHT":
             self._set("TRANSITION", self.c.transition_s)
         elif self.state == "TRANSITION":
-            self._set("RED_LIGHT", self.rng.uniform(*self.c.red_s))
+            self._set("RED_LIGHT", None if self._button_lights() else self.rng.uniform(*self.c.red_s))
         elif self.state == "RED_LIGHT":
             self._set("GREEN_LIGHT", self.rng.uniform(*self.c.green_s))
 
@@ -412,7 +462,7 @@ class Engine:
         if self.state == "RED_LIGHT" and reason in ("camera", "imu", "both"):
             body["caught_red_s"] = round(now - self.red_t0, 1)
         if self.caught and reason in ("camera", "both"):
-            part, score = self.caught.get("part"), self.caught.get("score")
+            part, score = self.caught.get("part"), motion_ratio(self.caught)
             if part:
                 body["caught_part"] = body["part"] = part
             if _number(score):

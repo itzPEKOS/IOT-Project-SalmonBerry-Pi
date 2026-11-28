@@ -254,6 +254,15 @@ test("the timeline also reads the Pi field name score", () => {
   assert.deepEqual(rec.timeline().motion, [{ t: 3.5, v: 0.57 }]);
 });
 
+test("the timeline also reads motion_score from the new pi client", () => {
+  const rec = new Recorder();
+  feed(rec, [
+    [0, S, { round_id: "r1", state: "RED_LIGHT" }],
+    [500, "rlgl/gateway/vision", { event: "frame", motion_score: 0.61, valid: 1 }],
+  ]);
+  assert.deepEqual(rec.timeline().motion, [{ t: 0.5, v: 0.61 }]);
+});
+
 test("what happened marks the red light where the player was caught", () => {
   const rec = new Recorder();
   feed(rec, [
