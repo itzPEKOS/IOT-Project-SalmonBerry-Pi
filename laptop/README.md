@@ -54,7 +54,7 @@ python ../sim/simulate.py --rounds 3 --fake-backend
 python set_broker_ip.py <IP ใหม่>
 ```
 
-สคริปต์แก้ `MQTT_URL` และ `RLGL_MQTT_HOST` ใน `.env`, `PI_HOST` ใน `rlgl-dashboard/config.js` แล้วรีสตาร์ต Telegraf ให้ ส่วน ESP ต้องแก้ `MQTT_HOST` แล้วแฟลชเอง
+สคริปต์แก้ `MQTT_URL`, `RLGL_MQTT_HOST` และ `RLGL_STREAM_URL` ใน `.env` แล้วรีสตาร์ต Telegraf ให้ ส่วน ESP ต้องแก้ `MQTT_HOST` แล้วแฟลชเอง
 
 ## แก้ dashboard
 
@@ -64,7 +64,7 @@ python set_broker_ip.py <IP ใหม่>
 ## ชื่อ topic และ field
 
 ดู [`docs/mqtt-contract.md`](../docs/mqtt-contract.md) เป็น**ฉบับร่าง** ที่ทีมยังต้องยืนยัน
-บางข้อยังไม่ตรงกับ `ARCHITECTURE.md` ที่ root เช่น เรื่อง LED และตำแหน่ง game engine
+บางข้อยังไม่ตรงกับ `docs/ARCHITECTURE.md` เช่น เรื่อง LED และตำแหน่ง game engine
 
 ## สถานะ
 

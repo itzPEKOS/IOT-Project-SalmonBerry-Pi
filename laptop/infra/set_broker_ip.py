@@ -4,12 +4,13 @@
     python set_broker_ip.py 172.20.10.2
     python set_broker_ip.py 172.20.10.2 --no-restart   # ไม่รีสตาร์ต Telegraf ให้
 
-แก้ให้:
-  - infra/.env           : MQTT_URL (Telegraf) และ RLGL_MQTT_HOST (backend เว็บ)
-  - rlgl-dashboard/config.js : PI_HOST (WebSocket, วิดีโอ, captures)
+แก้ให้ใน infra/.env:
+  - MQTT_URL         (Telegraf)
+  - RLGL_MQTT_HOST   (backend เว็บ และ game engine)
+  - RLGL_STREAM_URL  (ภาพสดจากกล้อง Pi: เปลี่ยนแค่ IP, port และ path คงเดิม)
 แล้วรัน `docker compose up -d` เพื่อให้ Telegraf โหลดค่าใหม่
 
-ที่สคริปต์นี้แก้ให้ไม่ได้: โค้ดบน ESP1/ESP2 (`#define MQTT_HOST`) ต้องแก้แล้วแฟลชเอง
+ที่สคริปต์นี้แก้ให้ไม่ได้: ESP แต่ละตัว (MQTT_HOST ใน esp32/<ชื่อ>/secrets.h) ต้องแก้แล้วแฟลชเอง
 """
 import argparse
 import ipaddress
@@ -24,7 +25,6 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 HERE = pathlib.Path(__file__).resolve().parent
 ENV_FILE = HERE / ".env"
-CONFIG_JS = HERE.parent.parent / "rlgl-dashboard" / "config.js"
 
 
 def set_env_key(text: str, key: str, value: str) -> tuple[str, str]:
@@ -52,8 +52,6 @@ def main() -> None:
 
     if not ENV_FILE.exists():
         sys.exit(f"ไม่พบ {ENV_FILE} รัน python make_env.py ก่อน")
-    if not CONFIG_JS.exists():
-        sys.exit(f"ไม่พบ {CONFIG_JS}")
 
     # เช็กก่อนว่าต่อ broker ได้จริง ถ้าไม่ได้ให้เตือนแต่ยังแก้ให้ (เผื่อ Pi ยังไม่เปิด)
     try:
@@ -66,18 +64,15 @@ def main() -> None:
     env_text = ENV_FILE.read_bytes().decode("utf-8")
     env_text, old_url = set_env_key(env_text, "MQTT_URL", f"tcp://{ip}:{args.port}")
     env_text, old_host = set_env_key(env_text, "RLGL_MQTT_HOST", ip)
+    stream = re.search(r"^RLGL_STREAM_URL=(.*)$", env_text, re.MULTILINE)
+    old_stream = stream.group(1).strip() if stream else ""
+    new_stream = (re.sub(r"^(https?://)[^/:]+", rf"\g<1>{ip}", old_stream) if old_stream
+                  else f"http://{ip}:8000/stream")  # ค่าเริ่มต้นของ pi_client.py
+    env_text, _ = set_env_key(env_text, "RLGL_STREAM_URL", new_stream)
     ENV_FILE.write_bytes(env_text.encode("utf-8"))
+    print(f"[แก้] .env  RLGL_STREAM_URL: {old_stream or '(ยังไม่มี)'} -> {new_stream}")
     print(f"[แก้] .env  MQTT_URL: {old_url} -> tcp://{ip}:{args.port}")
     print(f"[แก้] .env  RLGL_MQTT_HOST: {old_host} -> {ip}")
-
-    # config.js ของหน้าเว็บ
-    js_text = CONFIG_JS.read_bytes().decode("utf-8")
-    js_pattern = re.compile(r"const PI_HOST = '([^']*)';")
-    match = js_pattern.search(js_text)
-    if not match:
-        sys.exit("ไม่พบบรรทัด const PI_HOST = '...'; ใน config.js (รูปแบบไฟล์เปลี่ยนไป)")
-    CONFIG_JS.write_bytes(js_pattern.sub(f"const PI_HOST = '{ip}';", js_text, count=1).encode("utf-8"))
-    print(f"[แก้] config.js  PI_HOST: {match.group(1)} -> {ip}")
 
     # Telegraf
     if args.no_restart:
@@ -92,8 +87,8 @@ def main() -> None:
 
     print()
     print("ยังต้องทำเอง:")
-    print(f"  - ESP1, ESP2: แก้ #define MQTT_HOST \"{ip}\" แล้วแฟลชใหม่")
-    print("  - backend เว็บ (ถ้ากำลังรันอยู่): รีสตาร์ตเพื่อให้อ่าน RLGL_MQTT_HOST ใหม่")
+    print(f"  - ESP ทุกตัว: แก้ MQTT_HOST = \"{ip}\" ใน esp32/<ชื่อ>/secrets.h แล้วแฟลชใหม่")
+    print("  - backend เว็บ และ game engine (ถ้ากำลังรันอยู่): รีสตาร์ตเพื่อให้อ่านค่าใหม่")
     print("  - หน้าเว็บ: รีเฟรชเบราว์เซอร์")
 
 

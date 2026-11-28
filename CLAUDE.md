@@ -13,10 +13,10 @@
 
 | ไฟล์ | เนื้อหา |
 | :--- | :--- |
-| `red_light_green_light_iot_spec.md` | สเปก: ฮาร์ดแวร์, state machine, dashboard, edge cases, checklist เกณฑ์ |
-| `ARCHITECTURE.md` | การตัดสินใจล่าสุด: broker เดียวบน Pi, ใครคำนวณอะไร, แผนสำรอง, สถานะเทียบเกณฑ์ 25 คะแนน |
+| `docs/spec.md` | สเปก: ฮาร์ดแวร์, state machine, dashboard, edge cases, checklist เกณฑ์ |
+| `docs/ARCHITECTURE.md` | การตัดสินใจล่าสุด: broker เดียวบน Pi, ใครคำนวณอะไร, แผนสำรอง, สถานะเทียบเกณฑ์ 25 คะแนน |
 
-ถ้าสองไฟล์ขัดกัน ให้ยึด `ARCHITECTURE.md` (ใหม่กว่า) และแก้ให้ตรงกัน
+ถ้าสองไฟล์ขัดกัน ให้ยึด `docs/ARCHITECTURE.md` (ใหม่กว่า) และแก้ให้ตรงกัน
 
 ## สถาปัตยกรรม (สรุป)
 
@@ -39,10 +39,16 @@
 
 | ไฟล์ | ใช้ทำอะไร |
 | :--- | :--- |
-| `test_motion.py` | ทดสอบบนโน้ตบุ๊กด้วยเว็บแคม: `--method` mediapipe / pose / diff, แถบ score แยกส่วน, ปรับ thr สด (`+`/`-`, `[`/`]`), วัด FPS/CPU/RAM, บันทึก `captures/benchmark.csv` |
-| `pi_detect.py` | รันบน Pi: กล้อง CSI (Picamera2) หรือ USB, จำลองรอบไฟเขียว/แดงเอง, พิมพ์ผลทาง terminal (ใช้ผ่าน SSH ได้) |
+| `esp32/wrist/wrist.ino`, `esp32/finish/finish.ino` | ESP ข้อมือ และ ESP เส้นชัย (ค่า Wi-Fi / IP broker อยู่ใน `secrets.h` ที่ไม่ขึ้น git) |
+| `pi/pi_client.py` | รันบน Pi: กล้อง + MediaPipe → MQTT `rlgl/gateway/vision`, ภาพสด `:8000/stream`, อัดคลิปส่ง backend |
+| `pi/motion_detector.py` | ตัวตรวจการขยับที่ `pi_client.py` ใช้ |
+| `laptop/engine/` | game engine: state ของเกม และตัดสินแพ้ชนะ |
+| `laptop/web/` | backend (FastAPI) + หน้าเว็บของผู้เล่นและ scoreboard |
+| `laptop/infra/` | Docker: InfluxDB, Telegraf, Grafana |
+| `pi/test_motion.py` | ทดสอบบนโน้ตบุ๊กด้วยเว็บแคม: `--method` mediapipe / pose / diff, แถบ score แยกส่วน, ปรับ thr สด (`+`/`-`, `[`/`]`), วัด FPS/CPU/RAM, บันทึก `captures/benchmark.csv` |
+| `tools/pi_detect.py` | รันบน Pi: กล้อง CSI (Picamera2) หรือ USB, จำลองรอบไฟเขียว/แดงเอง, พิมพ์ผลทาง terminal (ใช้ผ่าน SSH ได้) |
 
-* `pi_detect.py` import ฟังก์ชันจาก `test_motion.py` (`MediaPipePose`, `pose_score`, `part_scores`, `ResourceMonitor`, `draw_mp_all`, `save_benchmark`) **ต้องอยู่โฟลเดอร์เดียวกัน** ถ้าแก้ signature ใน `test_motion.py` ต้องเช็ก `pi_detect.py` ด้วย
+* `pi/pi_client.py` และ `tools/pi_detect.py` import ฟังก์ชันจาก `pi/test_motion.py` (`MediaPipePose`, `draw_mp_all`, `put` ฯลฯ) ถ้าแก้ signature ใน `test_motion.py` ต้องเช็กสองไฟล์นี้ด้วย (`tools/` หาไฟล์ใน `pi/` เองผ่าน `sys.path`)
 * โมเดลหลัก: **MediaPipe Pose Landmarker lite** (ผู้เล่นคนเดียว, ลงบน Pi ง่าย) / YOLO26n-pose ไว้เทียบ / frame differencing เป็น baseline
 
 ## Logic คำนวณการขยับ (ห้ามเปลี่ยนโดยไม่บอกทีม)
@@ -78,10 +84,10 @@ MediaPipe มี 33 จุด แปลงเหลือ 17 ด้วย `MP_TO
 
 * เอกสาร คอมเมนต์ และข้อความถึงผู้ใช้เป็น**ภาษาไทย** ชื่อตัวแปร ฟังก์ชัน และ topic เป็นภาษาอังกฤษ
 * ข้อความที่วาดบนภาพด้วย `cv2.putText` ต้องเป็นภาษาอังกฤษ (OpenCV แสดงภาษาไทยไม่ได้)
-* IP ของ broker อ่านจาก config ที่เดียว: ESP ใช้ `#define MQTT_HOST`, Python ใช้ `config.yaml` / `.env`
+* IP ของ broker อ่านจาก config ที่เดียว: ESP ใช้ `MQTT_HOST` ใน `esp32/<ชื่อ>/secrets.h`, laptop ใช้ `laptop/infra/.env`
 * MQTT topic ขึ้นต้นด้วย `rlgl/` เสมอ
 * โค้ดบน ESP ห้ามใช้ `delay()` ใน loop หลัก (โดยเฉพาะตอนกะพริบ LED) ใช้ `millis()` เพื่อให้ `client.loop()` ทำงานตลอด
-* อย่า commit ไฟล์โมเดลหรือผลทดสอบ: `*.pt`, `*.task`, `captures/` (ต้องเพิ่มใน `.gitignore`)
+* อย่า commit ไฟล์โมเดลหรือผลทดสอบ: `*.pt`, `*.task`, `captures/`, `replays/` และ `esp32/**/secrets.h` (อยู่ใน `.gitignore` แล้ว)
 
 ## เกณฑ์ที่ยังไม่ผ่าน / งานค้าง
 

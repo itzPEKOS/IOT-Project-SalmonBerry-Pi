@@ -221,3 +221,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- RLGL: ห้ามขึ้น repo (public) ----
+# ค่า Wi-Fi / IP ของ ESP (คัดลอกจาก esp32/secrets.example.h)
+esp32/**/secrets.h
+# ไฟล์โมเดล: pi/test_motion.py ดาวน์โหลด .task เองตอนรันครั้งแรก
+*.pt
+*.task
+# รูปและคลิปที่มีหน้าคน (pi_client.py บันทึกไว้ในเครื่อง)
+captures/
+replays/

@@ -1,0 +1,12 @@
+# สคริปต์กล้องบน Raspberry Pi (pi_client.py)
+# ติดตั้งใน venv ที่เห็น picamera2 ของระบบ:
+#   sudo apt install -y python3-picamera2 ffmpeg
+#   python3 -m venv --system-site-packages ~/rlgl-venv
+#   source ~/rlgl-venv/bin/activate
+#   pip install -r requirements.txt
+# ห้ามลง opencv-python แยก (mediapipe ลง opencv-contrib-python มาให้แล้ว)
+mediapipe
+numpy
+paho-mqtt>=2
+requests
+psutil
