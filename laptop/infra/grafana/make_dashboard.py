@@ -7,12 +7,20 @@ RANGE = "|> range(start: v.timeRangeStart, stop: v.timeRangeStop)"
 panels = []
 
 
-def source(measurement, field):
-    """field เป็นชื่อเดียว หรือ tuple ของชื่อที่ความหมายเดียวกัน (อุปกรณ์แต่ละรุ่นส่งคนละชื่อ)"""
+# ชีพจรที่ใช้ได้ (InfluxDB เก็บทุกค่า รวม bpm 0 ตอนวัดไม่ได้) กราฟแสดงเฉพาะช่วงนี้
+BPM_OK = "r._value >= 45.0 and r._value <= 180.0"
+
+
+def source(measurement, field, where=None):
+    """field เป็นชื่อเดียว หรือ tuple ของชื่อที่ความหมายเดียวกัน (อุปกรณ์แต่ละรุ่นส่งคนละชื่อ)
+    where = เงื่อนไขกรองค่าเพิ่ม (Flux) เช่น BPM_OK"""
     names = (field,) if isinstance(field, str) else field
     match = " or ".join(f'r._field == "{name}"' for name in names)
-    return (f'from(bucket: "rlgl")\n  {RANGE}\n'
-            f'  |> filter(fn: (r) => r._measurement == "{measurement}" and ({match}))')
+    query = (f'from(bucket: "rlgl")\n  {RANGE}\n'
+             f'  |> filter(fn: (r) => r._measurement == "{measurement}" and ({match}))')
+    if where:
+        query += f'\n  |> filter(fn: (r) => {where})'
+    return query
 
 
 def add(kind, title, query, x, y, w, h, **extra):
@@ -37,12 +45,12 @@ def steps(*pairs):
     return {"mode": "absolute", "steps": [{"color": c, "value": v} for v, c in pairs]}
 
 
-def latest(measurement, field):
-    return (source(measurement, field) +
+def latest(measurement, field, where=None):
+    return (source(measurement, field, where) +
             '\n  |> group()\n  |> sort(columns: ["_time"])\n  |> last()\n  |> keep(columns: ["_value"])')
 
 
-def stat(title, measurement, field, x, y, w=4, unit=None, mappings=None, thresholds=None, text_field=False):
+def stat(title, measurement, field, x, y, w=4, unit=None, mappings=None, thresholds=None, text_field=False, where=None):
     defaults = {"thresholds": thresholds or steps((None, "blue")), "noValue": "--"}
     if unit:
         defaults["unit"] = unit
@@ -50,12 +58,13 @@ def stat(title, measurement, field, x, y, w=4, unit=None, mappings=None, thresho
         defaults["mappings"] = [{"type": "value", "options": mappings}]
     options = {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "/.*/" if text_field else "", "values": False},
                "colorMode": "background" if mappings else "value", "graphMode": "none"}
-    add("stat", title, latest(measurement, field), x, y, w, 4,
+    add("stat", title, latest(measurement, field, where), x, y, w, 4,
         fieldConfig={"defaults": defaults, "overrides": []}, options=options)
 
 
-def series(title, measurement, field, x, y, w=12, fn="mean", unit=None, limit=None, name=None, empty=None):
-    query = (source(measurement, field) +
+def series(title, measurement, field, x, y, w=12, fn="mean", unit=None, limit=None, name=None, empty=None,
+           where=None):
+    query = (source(measurement, field, where) +
              '\n  |> group()'  # หลายชื่อ field รวมเป็นเส้นเดียว
              f'\n  |> aggregateWindow(every: v.windowPeriod, fn: {fn}, createEmpty: false)'
              '\n  |> keep(columns: ["_time", "_value"])')
@@ -102,12 +111,13 @@ row("สด: เกมและผู้เล่น", 0)
 stat("สถานะเกม", "game_state", "state", 0, 1, w=8, text_field=True,
      mappings={k: {"color": v, "text": k} for k, v in STATE_COLORS.items()})
 stat("เวลาที่เหลือ", "game_state", "remaining_s", 8, 1, unit="suffix: s")
-stat("ชีพจร (BPM)", "heartrate", "bpm", 12, 1,
+stat("ชีพจร (BPM)", "heartrate", "bpm", 12, 1, where=BPM_OK,
      thresholds=steps((None, "green"), (120, "orange"), (150, "red")))
 stat("ระยะผู้เล่น", "distance", "distance_cm", 16, 1, unit="suffix: cm")
 stat("FPS กล้อง", "vision", "fps", 20, 1)
 
-series("ชีพจร", "heartrate", "bpm", 0, 5, name="BPM")
+series("ชีพจร (เฉพาะค่า 45-180)", "heartrate", "bpm", 0, 5, name="BPM", where=BPM_OK,
+       empty="ยังไม่มีชีพจรที่วัดได้ (ดูสัญญาณดิบด้านล่าง)")
 series("ระยะผู้เล่น", "distance", "distance_cm", 12, 5, name="cm")
 # เส้นเกณฑ์เป็นค่าตัวอย่าง ต้องปรับตามผล calibrate
 series("ข้อมือ: acc_peak (เส้นเกณฑ์ตัวอย่าง 0.3 g)", "imu", "acc_peak", 0, 12, fn="max", limit=0.3, name="acc_peak (g)")
@@ -119,13 +129,17 @@ series("กล้อง: การขยับเทียบเกณฑ์ต�
        empty="ยังไม่มีไฟแดงในช่วงเวลานี้ (Pi ส่งค่านี้เฉพาะตอนไฟแดง)")
 series("กล้อง: FPS", "vision", "fps", 12, 19, name="fps")
 
-row("ประวัติ (ตารางย้อนหลัง 7 วัน)", 26)
-table("ผลแต่ละรอบ", history("game_result", ["round_id", "result", "reason", "duration_s"]), 0, 27, 12, 9, window="7d",
+# สัญญาณดิบของ KY-039 (ADC 0-4095) ใช้ดูว่าเซนเซอร์ทำงานไหม: ค่าค้างที่ 4095 หรือ 0 = สายหรือแรงดันผิด
+series("ชีพจร: สัญญาณดิบ KY-039 (raw, 0-4095)", "heartrate", "raw", 0, 26, name="raw")
+series("ชีพจร: ทุกค่า bpm ที่ ESP ส่ง (0 = วัดไม่ได้)", "heartrate", "bpm", 12, 26, fn="last", name="bpm")
+
+row("ประวัติ (ตารางย้อนหลัง 7 วัน)", 33)
+table("ผลแต่ละรอบ", history("game_result", ["round_id", "result", "reason", "duration_s"]), 0, 34, 12, 9, window="7d",
       columns=["_time", "result", "reason", "duration_s", "round_id"])
 table("สรุปของรอบ", history("game_summary", ["round_id", "bpm_avg", "bpm_max", "red_motion_max",
-                                             "red_acc_peak_max", "red_light_count"]), 12, 27, 12, 9, window="7d",
+                                             "red_acc_peak_max", "red_light_count"]), 12, 34, 12, 9, window="7d",
       columns=["_time", "bpm_avg", "bpm_max", "red_motion_max", "red_acc_peak_max", "red_light_count", "round_id"])
-table("คลิปวิดีโอ", history("media", ["round_id", "status", "video_url"]), 0, 36, 12, 8, window="7d",
+table("คลิปวิดีโอ", history("media", ["round_id", "status", "video_url"]), 0, 43, 12, 8, window="7d",
       columns=["_time", "round_id", "status", "video_url"],
       overrides=[{"matcher": {"id": "byName", "options": "video_url"},
                   "properties": [{"id": "links", "value": [{"title": "เปิดวิดีโอ", "url": "${__value.raw}",
@@ -134,7 +148,7 @@ table("สถานะอุปกรณ์",
       source("device_status", "status") +
       '\n  |> group(columns: ["device_id"])\n  |> sort(columns: ["_time"])\n  |> last()\n  |> group()'
       '\n  |> keep(columns: ["device_id", "_value", "_time"])\n  |> rename(columns: {_value: "status"})',
-      12, 36, 12, 8, window="7d", columns=["device_id", "status", "_time"])
+      12, 43, 12, 8, window="7d", columns=["device_id", "status", "_time"])
 
 dashboard = {
     "uid": "rlgl-main",

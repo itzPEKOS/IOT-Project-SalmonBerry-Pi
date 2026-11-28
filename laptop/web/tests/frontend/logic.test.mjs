@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import {
   clock, countdown, screenFor, causeText, partName, progress, bpmFresh, Recorder, whatHappened, roundLabel,
-  countdownPhase, roundLimit,
+  countdownPhase, roundLimit, controlsFor,
 } from "../../frontend/js/logic.js";
 
 test("clock shows minutes, seconds and tenths", () => {
@@ -27,6 +27,36 @@ test("round label pads the number", () => {
   assert.equal(roundLabel(7), "#07");
   assert.equal(roundLabel(124), "#124");
   assert.equal(roundLabel(null), "#--");
+});
+
+test("operator buttons follow the game state", () => {
+  const ops = (state, extra = {}) => controlsFor({ state, mode: "rlgl", touchOk: true, ...extra }).map((b) => b.cmd + (b.disabled ? "-" : ""));
+  assert.deepEqual(ops("IDLE"), []);
+  assert.deepEqual(ops("CALIBRATE"), ["abort"]);
+  assert.deepEqual(ops("CALIBRATE_FAILED"), ["start", "abort"]);
+  assert.deepEqual(ops("READY"), ["start", "abort"]);
+  assert.deepEqual(ops("COUNTDOWN"), ["abort"]);
+  assert.deepEqual(ops("GREEN_LIGHT"), ["start", "abort"]);
+  assert.deepEqual(ops("TRANSITION"), ["start-", "abort"]);
+  assert.deepEqual(ops("RED_LIGHT"), ["start", "abort"]);
+  assert.deepEqual(ops("SNIPER", { mode: "sniper" }), ["abort"]);
+  assert.deepEqual(ops("WIN"), []);
+});
+
+test("the main button says what pressing it will do", () => {
+  const main = (state) => controlsFor({ state, mode: "rlgl", touchOk: true })[0];
+  assert.equal(main("READY").label, "START ▶");
+  assert.equal(main("CALIBRATE_FAILED").label, "CALIBRATE AGAIN");
+  assert.equal(main("GREEN_LIGHT").label, "RED LIGHT");
+  assert.equal(main("RED_LIGHT").label, "GREEN LIGHT");
+  assert.equal(main("GREEN_LIGHT").key, "space");
+});
+
+test("a finish button appears only when the touch sensor is not working", () => {
+  const cmds = (touchOk) => controlsFor({ state: "GREEN_LIGHT", mode: "rlgl", touchOk }).map((b) => b.cmd);
+  assert.deepEqual(cmds(true), ["start", "abort"]);
+  assert.deepEqual(cmds(false), ["start", "touch", "abort"]);
+  assert.deepEqual(controlsFor({ state: "SNIPER", mode: "sniper", touchOk: false }).map((b) => b.cmd), ["touch", "abort"]);
 });
 
 test("calibrate, a failed check and ready all show the calibrate screen", () => {

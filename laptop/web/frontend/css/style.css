@@ -102,6 +102,8 @@ button { font: inherit; color: inherit; }
 .btn:disabled { cursor: not-allowed; opacity: .45; }
 .btn.primary { background: var(--green); color: var(--inverse); }
 .btn.danger { background: var(--red); color: var(--inverse); }
+.btn.red { background: var(--red); color: var(--inverse); }
+.btn.green { background: var(--green); color: var(--inverse); }
 .btn.cyan { background: var(--bg-panel-alt); color: var(--cyan); }
 .btn:focus-visible, .tab:focus-visible, .chip-btn:focus-visible { outline: 3px solid var(--yellow); outline-offset: 2px; }
 .link { background: none; border: none; cursor: pointer; padding: 0; font-family: var(--pixel); font-size: 11px; letter-spacing: 1px; color: var(--cyan); }
@@ -351,3 +353,10 @@ table.history td.cause.lose { color: var(--red); }
 @keyframes cd-pop { 0% { transform: scale(1.8); opacity: 0.4; } 12% { transform: scale(1); opacity: 1; } 85% { transform: scale(1); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.7; } }
 @keyframes cd-run { from { transform: translateX(-55vw); } to { transform: translateX(0); } }
 @keyframes cd-blink { 50% { color: var(--yellow); } }
+
+/* ปุ่มคุมเกมของคนคุม (แทนหน้าต่าง game engine / ปุ่ม joystick) */
+.ops { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 16px; }
+.ops:empty { display: none; }
+.ops .hint { color: var(--muted); font-size: 14px; }
+.ops .msg { color: var(--red); font-size: 14px; }
+.cal-status .ops { margin: 16px 0 0; }

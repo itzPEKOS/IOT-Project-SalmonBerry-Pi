@@ -19,7 +19,7 @@ engine อ่าน IP ของ broker จาก `RLGL_MQTT_HOST` ใน `infra
 
 ## หนึ่งรอบ
 
-ใส่ชื่อผู้เล่นและเลือกโหมดบนหน้าเว็บก่อน แล้วใช้**ปุ่มเดียว** (ปุ่มบน joystick ของ ESP2 หรือ Enter ในหน้าต่าง engine):
+ใส่ชื่อผู้เล่นและเลือกโหมดบนหน้าเว็บ แล้วคุมเกมด้วย**ปุ่มบนหน้าเว็บ** (หรือปุ่มบน joystick / Enter ในหน้าต่าง engine ซึ่งทำงานเหมือนกัน):
 
 ```
 IDLE ─กดครั้งที่ 1─→ CALIBRATE 5 วิ (ยืนนิ่ง + เช็ก sensor)
@@ -31,7 +31,22 @@ IDLE ─กดครั้งที่ 1─→ CALIBRATE 5 วิ (ยืนน�
 - **ระหว่างเล่นเกม 1:** ปุ่มเดียวกันใช้เปลี่ยนไฟ (ดูหัวข้อ "เกม 1: เปลี่ยนไฟด้วยปุ่ม")
 - **เวลาเล่น 30 วินาที:** เริ่มนับตอนไฟเขียวแรก (Sniper: ตอนเริ่ม `SNIPER`)
 
-คำสั่งในหน้าต่าง engine:
+### คุมจากหน้าเว็บ (ไม่ต้องใช้หน้าต่าง engine)
+
+| หน้า | ปุ่ม | ทำอะไร |
+|---|---|---|
+| ใส่ชื่อ | NEXT: CALIBRATE / PLAY WITHOUT A NAME | บันทึกชื่อ แล้วเริ่ม calibrate |
+| calibrate เสร็จ (`READY`) | START ▶ | นับถอยหลังแล้วเริ่มเล่น |
+| calibrate ไม่ผ่าน | CALIBRATE AGAIN | calibrate ใหม่ |
+| เกม 1 ระหว่างเล่น | RED LIGHT / GREEN LIGHT | สลับไฟ (เขียว → เตือน 1.5 วิ → แดง → เขียว) |
+| touch ใช้ไม่ได้ | FINISH ⚑ | แตะเส้นชัยแทน sensor |
+| ทุกช่วง | ABORT | ยกเลิกรอบ |
+
+- **คีย์ลัด:** กด **Space** แทนปุ่มหลัก (START / สลับไฟ) ได้
+- **ทางทำงาน:** หน้าเว็บ → `POST /api/cmd` → `rlgl/cmd/game` → engine ดังนั้นหน้าต่าง engine ต้องเปิดค้างไว้
+- **จอคนดู (`?role=viewer`):** ไม่มีปุ่ม
+
+คำสั่งในหน้าต่าง engine (ใช้แทนหน้าเว็บได้):
 
 | ปุ่ม | ทำอะไร |
 |---|---|
@@ -48,33 +63,33 @@ IDLE ─กดครั้งที่ 1─→ CALIBRATE 5 วิ (ยืนน�
 |---|---|
 | `backend-01` | ยกเลิกรอบ (`disconnect`) |
 | `web-01` (มีหน้าเว็บเปิดอยู่) | ยกเลิกรอบ (`disconnect`) |
-| `wrist-01` | ยกเลิกรอบ (`disconnect`) |
 | Pi (`rlgl/status/pi` หรือ `gateway-01`) | ยกเลิกรอบ (`camera_lost`) |
 | broker | engine หลุดจาก broker ก็ยกเลิกรอบ (`disconnect`) |
 
 ### เช็ก sensor ตอน calibrate
 
-online อย่างเดียวไม่พอ ระหว่าง calibrate 5 วินาที sensor ต้องส่งข้อมูลจริง:
+ระหว่าง calibrate 5 วินาที engine เช็กว่า sensor ส่งข้อมูลจริง **บังคับแค่กล้อง** ตัวอื่นใช้ไม่ได้ก็ยังเล่นต่อ:
 
-| sensor (`--sensors`) | อุปกรณ์ | ผ่านเมื่อ | บังคับตอนนี้ |
+| sensor (`--sensors`) | อุปกรณ์ | ผ่านเมื่อ | ถ้าใช้ไม่ได้ |
 |---|---|---|---|
-| `imu` | ESP ข้อมือ (MPU6050) | ได้ `rlgl/wrist/imu` อย่างน้อย 20 ค่า | ✓ |
-| `heart` | ESP ข้อมือ (KY-039) | ได้ `bpm` 45-180 อย่างน้อย 1 ค่า | ✓ |
-| `camera` | Pi (MediaPipe) | เห็นผู้เล่น (`player_seen` หรือ `valid`) ภายใน 2 วินาทีล่าสุด | ✓ |
-| `distance` | ESP เส้นชัย `finish-01` (HC-SR04) | ได้ `rlgl/gateway/distance` อย่างน้อย 1 ค่า | ไม่บังคับ (ESP นี้เพิ่งเพิ่มเข้ามา) |
-| `touch` | ESP เส้นชัย `finish-01` (แผ่นโลหะ) | `finish-01` online (touch ส่งข้อมูลเฉพาะตอนแตะ จึงเช็กล่วงหน้าได้แค่นี้) | ไม่บังคับ |
-| `station` | ESP สถานี (joystick, servo) | `station-01` online | ESP สถานียังไม่พร้อม |
+| `camera` | Pi (MediaPipe) | เห็นผู้เล่น (`player_seen` หรือ `valid`) ภายใน 2 วินาทีล่าสุด | **calibrate ไม่ผ่าน** |
+| `imu` | ESP ข้อมือ (MPU6050) | ได้ `rlgl/wrist/imu` อย่างน้อย 20 ค่า | เล่นต่อ รอบนั้นไม่ใช้ข้อมือตัดสิน |
+| `heart` | ESP ข้อมือ (KY-039) | ได้ `bpm` 45-180 อย่างน้อย 1 ค่า | เล่นต่อ ไม่มีกราฟชีพจร |
+| `distance` | ESP เส้นชัย `finish-01` (ultrasonic) | ได้ `rlgl/gateway/distance` อย่างน้อย 1 ค่า | เล่นต่อ ตัวละครบนหน้าเว็บไม่เดิน |
+| `touch` | ESP เส้นชัย `finish-01` (แผ่นโลหะ) | `finish-01` online | เล่นต่อ หน้าเว็บมีปุ่ม FINISH ให้กดแทน |
+| `station` | ESP สถานี (joystick, servo) | `station-01` online | เล่นต่อ |
+
+- ESP ข้อมือ**ไม่ต้อง online** ก็เริ่มรอบได้ และหลุดกลางรอบก็ไม่ยกเลิกรอบ
 
 - **ESP เส้นชัย (`finish-01`):** ส่งทั้งระยะ (ultrasonic) และการแตะเส้นชัย engine ใช้ `rlgl/gateway/finish` ตัดสินชนะแทนการกด `t` ได้เลย
 - **ไม่ผ่าน:** engine พิมพ์ว่าตัวไหนใช้ไม่ได้ และหน้าเว็บแสดง ✗ แดงที่ตัวนั้น แก้แล้วกด Enter เพื่อ calibrate ใหม่
-- **sensor ที่ไม่บังคับ:** ยังแสดงบนหน้าเว็บ ถ้ามีข้อมูลขึ้น ✓ ถ้าไม่มีขึ้น NOT USED
+- **sensor ที่ไม่บังคับ:** ยังแสดงบนหน้าเว็บ ถ้ามีข้อมูลขึ้น ✓ ถ้าไม่มีขึ้น NOT USED และกล่องสถานะบอก "Playing without: …"
 - **เปลี่ยนรายการที่บังคับ:**
 
   | ต้องการ | คำสั่ง |
   |---|---|
-  | บังคับ ESP เส้นชัยด้วย (เมื่อ `finish-01` พร้อม) | `python -m engine --sensors imu,heart,camera,distance,touch` |
-  | บังคับครบทุกตัว (เมื่อ ESP สถานีพร้อมด้วย) | `python -m engine --sensors imu,heart,camera,distance,touch,station` |
-  | ไม่บังคับชีพจร (ถ้า KY-039 วัดไม่ได้ในวันเดโม) | `python -m engine --sensors imu,camera` |
+  | บังคับข้อมือด้วย | `python -m engine --sensors camera,imu` |
+  | บังคับ ESP เส้นชัยด้วย | `python -m engine --sensors camera,imu,distance,touch` |
   | ไม่เช็กอะไรเลย (ไว้ทดสอบ) | `python -m engine --skip-checks` |
 
 ## ทดสอบกล้องอย่างเดียว

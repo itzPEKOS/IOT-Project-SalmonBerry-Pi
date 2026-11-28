@@ -2,8 +2,8 @@
 // เปิดเป็นจอผู้เล่น: http://<laptop>:8000/          (role=display ส่ง ping ให้ game engine รู้ว่าจอยังอยู่)
 // เปิดเป็นจอคนดู:   http://<laptop>:8000/?role=viewer
 import {
-  PLAYING, ROUND_LIMIT_S, Recorder, bpmFresh, causeText, clock, countdown, countdownPhase, partName, progress,
-  roundLabel, roundLimit, screenFor, whatHappened,
+  PLAYING, ROUND_LIMIT_S, Recorder, bpmFresh, causeText, clock, controlsFor, countdown, countdownPhase, partName,
+  progress, roundLabel, roundLimit, screenFor, whatHappened,
 } from "./logic.js";
 import { fillSprites, sprite } from "./sprites.js";
 import { bpmChart, timelineChart } from "./charts.js";
@@ -241,6 +241,7 @@ function renderLive() {
     streams(shown);
   }
   ({ setup: renderSetup, calibrate: renderCalibrate, play: renderPlay, sniper: renderSniper, result: renderResult })[shown]?.();
+  renderControls();
 }
 
 // ภาพสดจาก Pi: เปิด connection เฉพาะหน้าที่ต้องใช้ เพื่อไม่ให้ Pi ส่งภาพเปล่า ๆ
@@ -340,7 +341,7 @@ function renderSetup() {
       ? [player.best_s !== null ? `Best ${clock(player.best_s)}` : "No win yet", player.rank ? `rank #${player.rank}` : null,
         `${player.rounds_played} ${modeName} round${player.rounds_played === 1 ? "" : "s"} played`].filter(Boolean).join(" · ")
       : `First ${modeName} round · good luck`;
-    $("#name-status").textContent = "Ready · operator: press START on the joystick to calibrate";
+    $("#name-status").textContent = "Ready · press NEXT: CALIBRATE (or the joystick button)";
   } else {
     $("#name-status").textContent = "Press ENTER";
   }
@@ -375,6 +376,41 @@ async function chooseMode(mode) {
   try { app.session = await post("/api/mode", { mode }); } catch (error) { $("#name-status").textContent = error.message; }
   lastSetupKey = "";
   schedule();
+}
+
+// ---- ปุ่มคุมเกม: หน้าเว็บ → POST /api/cmd → rlgl/cmd/game → game engine
+let opsMessage = "";
+async function sendCmd(cmd) {
+  try {
+    await post("/api/cmd", { cmd });
+    opsMessage = "";
+  } catch (error) {
+    opsMessage = `Not sent: ${error.message}`;
+  }
+  lastOpsKey = "";
+  schedule();
+}
+
+function currentControls() {
+  const state = app.latest[T.state];
+  if (!state || ROLE !== "display") return [];
+  const cal = app.latest[T.calibration]?.round_id === state.round_id ? app.latest[T.calibration] : null;
+  // ยังไม่รู้ผลเช็ก touch (engine รุ่นเก่า) ถือว่าใช้ได้ ไม่แสดงปุ่ม FINISH
+  const touchOk = cal && cal.check_touch ? cal.check_touch === "ok" : true;
+  return controlsFor({ state: state.state, mode: state.mode, touchOk });
+}
+
+let lastOpsKey = "";
+function renderControls() {
+  const controls = currentControls();
+  const key = JSON.stringify([app.screen, controls, opsMessage]);
+  if (key === lastOpsKey) return;
+  lastOpsKey = key;
+  const hasSpace = controls.some((c) => c.key === "space" && !c.disabled);
+  const html = controls.map((c) => `<button class="btn ${c.kind}" data-cmd="${c.cmd}" ${c.disabled ? "disabled" : ""}>${esc(c.label)}</button>`).join("")
+    + (controls.length && hasSpace ? '<span class="hint">or press SPACE / the joystick button</span>' : "")
+    + (opsMessage ? `<span class="msg">${esc(opsMessage)}</span>` : "");
+  for (const box of $$("[data-ops]")) box.innerHTML = box.closest("section")?.id === `v-${app.screen}` ? html : "";
 }
 
 // ---- 2) calibrate (เช็ก sensor) → READY หรือ CALIBRATE_FAILED
@@ -414,11 +450,11 @@ function renderCalibrate() {
   const bpm = bpmFresh(app.bpmAt, now) ? app.latest[T.heart]?.bpm : null;
   const distance = app.latest[T.distance]?.distance_cm;
   const value = {
-    imu: { ok: "OK", wait: "...", fail: "NO DATA", off: "--" },
-    heart: { ok: num(bpm) ? `${bpm} BPM` : "OK", wait: "...", fail: "NO PULSE", off: "--" },
-    camera: { ok: "OK", wait: "...", fail: "NOT SEEN", off: "--" },
+    imu: { ok: "OK", wait: "...", fail: "NO DATA", off: "NOT USED" },
+    heart: { ok: num(bpm) ? `${bpm} BPM` : "OK", wait: "...", fail: "NO PULSE", off: "NOT USED" },
+    camera: { ok: "OK", wait: "...", fail: "NOT SEEN", off: "NOT USED" },
     distance: { ok: num(distance) ? `${(distance / 100).toFixed(2)} m` : "OK", wait: "...", fail: "NO DATA", off: "NOT USED" },
-    touch: { ok: "ONLINE", wait: "...", fail: "OFFLINE", off: "NOT USED" },
+    touch: { ok: "ONLINE", wait: "...", fail: "OFFLINE", off: "USE FINISH BUTTON" },
     station: { ok: "ONLINE", wait: "...", fail: "OFFLINE", off: "NOT USED" },
   };
   $("#checks").innerHTML = SENSOR_ROWS.map(([key, title, text]) => {
@@ -429,9 +465,12 @@ function renderCalibrate() {
 
   const box = $("#cal-status");
   const names = Object.fromEntries(SENSOR_ROWS.map(([key, title]) => [key, title.split(" (")[0]]));
+  const skipped = String(cal?.skipped || "").split(",").filter(Boolean).map((k) => names[k] ?? k);
   if (ready) {
     box.className = "cal-status ok";
-    box.innerHTML = "<b>ALL SENSORS OK</b><span>Operator: press START again to begin</span>";
+    box.innerHTML = skipped.length
+      ? `<b>READY</b><span>Playing without: ${esc(skipped.join(", "))}</span>`
+      : "<b>ALL SENSORS OK</b><span>Ready to start</span>";
   } else if (failed) {
     const list = String(state.failed || cal?.failed || "").split(",").filter(Boolean).map((k) => names[k] ?? k).join(", ");
     box.className = "cal-status bad";
@@ -881,11 +920,19 @@ function bindEvents() {
     if (clean !== input.value) input.value = clean;
   });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") submitName(); });
-  $("#name-go").addEventListener("click", () => submitName());
+  $("#name-go").addEventListener("click", async () => {
+    // มีชื่อในช่อง = บันทึกชื่อก่อน แล้วสั่ง calibrate (ช่องว่าง + มีผู้เล่นอยู่แล้ว = calibrate เลย)
+    if ($("#name").value.trim() || !app.session.player) {
+      await submitName();
+      if (!app.session.player) return;
+    }
+    sendCmd("start");
+  });
   $("#recent").addEventListener("click", (e) => { const n = e.target.closest("[data-name]")?.dataset.name; if (n) submitName(n); });
   $("#guest").addEventListener("click", async () => {
     try { app.session = await api("/api/session", { method: "DELETE" }); } catch { /* ignore */ }
     input.value = ""; lastSetupKey = ""; schedule();
+    sendCmd("start");
   });
   $$("#v-setup [data-mode]").forEach((b) => b.addEventListener("click", () => chooseMode(b.dataset.mode)));
 
@@ -896,6 +943,18 @@ function bindEvents() {
   $("#modal-close").addEventListener("click", closeVideo);
   $("#video-modal").addEventListener("click", (e) => { if (e.target.id === "video-modal") closeVideo(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#video-modal").hidden) closeVideo(); });
+  // ปุ่ม SPACE = ปุ่มหลัก (START / สลับไฟ) ยกเว้นตอนพิมพ์ในช่องข้อความ
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" || e.repeat || e.target.closest("input, textarea, button")) return;
+    const main = currentControls().find((c) => c.key === "space" && !c.disabled);
+    if (!main || app.tab !== "live") return;
+    e.preventDefault();
+    sendCmd(main.cmd);
+  });
+  document.addEventListener("click", (e) => {
+    const cmd = e.target.closest("[data-ops] [data-cmd]")?.dataset.cmd;
+    if (cmd) sendCmd(cmd);
+  });
   $("#modal-slow").addEventListener("click", () => toggleSlow($("#modal-video"), $("#modal-slow")));
 
   $$("[data-lb]").forEach((b) => b.addEventListener("click", () => { app.board.lbMode = b.dataset.lb; loadBoard(); }));

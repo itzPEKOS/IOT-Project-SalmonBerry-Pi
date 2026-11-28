@@ -36,7 +36,8 @@ MODES = ("rlgl", "sniper")
 CAMERA_IDS = ("pi", "gateway-01")
 STATION_ID = "station-01"
 FINISH_ID = "finish-01"  # ESP ที่เส้นชัย: touch + ultrasonic
-DEFAULT_REQUIRE = ("backend-01", "web-01", "pi", "wrist-01")
+# ข้อมือไม่บังคับ: ถ้า ESP ข้อมือไม่อยู่ เกมยังเล่นได้ (ใช้กล้องตัดสินอย่างเดียว)
+DEFAULT_REQUIRE = ("backend-01", "web-01", "pi")
 # sensor ที่เช็กตอน calibrate: imu, heart = ESP ข้อมือ / camera = Pi / distance, touch = ESP เส้นชัย (finish-01)
 # station = ESP สถานี (joystick, servo)
 SENSORS = ("imu", "heart", "camera", "distance", "touch", "station")
@@ -64,7 +65,9 @@ class Config:
     dodge_acc_g: float = 0.6         # sniper: acc_peak เกินนี้ = หลบ 1 ครั้ง
     dodge_gap_s: float = 0.5         # sniper: หลบสองครั้งต้องห่างกันอย่างน้อยเท่านี้
     require: tuple = DEFAULT_REQUIRE  # อุปกรณ์ที่ต้อง online ก่อนเริ่ม และถ้าหลุดระหว่างเล่นจะยกเลิกรอบ
-    sensors: tuple = ("imu", "heart", "camera")  # sensor ที่ต้องส่งข้อมูลจริงตอน calibrate ถึงจะเล่นได้
+    # sensor ที่ต้องส่งข้อมูลจริงตอน calibrate ถึงจะเล่นได้ ตัวอื่นเช็กและแสดงผล แต่ใช้ไม่ได้ก็ยังเล่นต่อ
+    sensors: tuple = ("camera",)
+    drop_failed: bool = True         # IMU ที่ใช้ไม่ได้ตอน calibrate ไม่ใช้ตัดสินในรอบนั้น (กันค่าเพี้ยนทำให้แพ้)
     imu_min_samples: int = 20        # calibrate: ต้องได้ IMU อย่างน้อยกี่ค่า
     camera_fresh_s: float = 2.0      # calibrate: กล้องต้องเห็นผู้เล่นภายในกี่วินาทีล่าสุด
     # เกม 1: "button" = คนคุมกดปุ่ม joystick เปลี่ยนไฟ (เขียว → เตือน transition_s → แดง, แดง → เขียว)
@@ -107,6 +110,7 @@ class Engine:
         self.next_state_at = self.next_calibration_at = None
         self.calib_t0 = None
         self.failed = []
+        self.judge = tuple(self.c.judge)  # ใช้อะไรตัดสินในรอบนี้ (ตัด imu ออกถ้า calibrate แล้ว IMU ใช้ไม่ได้)
         self._clear_sensor_counts()
         self.imu_streak = 0
         self.caught = None      # ข้อความ moved จากกล้องในไฟแดงนี้
@@ -174,7 +178,7 @@ class Engine:
         if payload.get("player_seen") or payload.get("valid"):
             self.player_seen_at = now
         if (payload.get("event") == "moved" and self.state == "RED_LIGHT" and self._same_round(payload)
-                and self.caught is None and "camera" in self.c.judge):
+                and self.caught is None and "camera" in self.judge):
             self.caught = payload
 
     def _on_imu(self, payload, now):
@@ -185,7 +189,7 @@ class Engine:
         acc = acc if _number(acc) else 0.0
         gyro = gyro if _number(gyro) else 0.0
         if self.state == "RED_LIGHT":
-            if "imu" not in self.c.judge or now - self.red_t0 < self.c.imu_grace_s:
+            if "imu" not in self.judge or now - self.red_t0 < self.c.imu_grace_s:
                 return
             over = acc > self.c.imu_acc_g or gyro > self.c.imu_gyro_dps
             self.imu_streak = self.imu_streak + 1 if over else 0
@@ -395,6 +399,8 @@ class Engine:
         if self.state == "CALIBRATE":
             checks = self.sensor_checks(done=True)
             self.failed = [name for name in SENSORS if checks[name] == "fail"]
+            drop_imu = self.c.drop_failed and checks["imu"] != "ok"
+            self.judge = tuple(j for j in self.c.judge if not (drop_imu and j == "imu"))
             self._send_calibration(1.0, done=True, checks=checks)
             self._set("CALIBRATE_FAILED" if self.failed else "READY")
         elif self.state == "COUNTDOWN":
@@ -448,7 +454,8 @@ class Engine:
         body.update({f"check_{name}": status for name, status in checks.items()})
         if done:
             failed = [name for name in SENSORS if checks[name] == "fail"]
-            body.update(ok=int(not failed), failed=",".join(failed))
+            skipped = [name for name in SENSORS if checks[name] == "off"]  # ไม่บังคับและใช้ไม่ได้: เล่นต่อโดยไม่ใช้
+            body.update(ok=int(not failed), failed=",".join(failed), skipped=",".join(skipped))
         self.publish(CALIBRATION, body)
 
     def _end(self, result, reason):

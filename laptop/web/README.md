@@ -236,6 +236,7 @@ topic อื่นใน [`docs/mqtt-contract.md`](../../docs/mqtt-contract.md) 
 | `GET /api/session` | `player` (คนที่จะเล่นรอบถัดไป หรือ `null`, ตัวเลขเป็นของโหมดที่เลือก), `next_round_number`, `mode` |
 | `POST /api/session` ส่ง `{"name":"BERRY"}` | เลือกชื่อ (สร้างใหม่ถ้ายังไม่มี) ได้ข้อมูลแบบเดียวกับข้างบน |
 | `DELETE /api/session` | เลิกใช้ชื่อ รอบถัดไปไม่มีชื่อ |
+| `POST /api/cmd` ส่ง `{"cmd":"start"}` (หรือ `abort`, `green`, `red`, `touch`) | ปุ่มคุมเกมบนหน้าเว็บ backend publish `rlgl/cmd/game` ให้ game engine ตอบ `503` ถ้าไม่ได้ต่อ broker |
 | `POST /api/mode` ส่ง `{"mode":"rlgl"}` หรือ `"sniper"` | เลือกโหมด backend publish `rlgl/game/mode` (retained) ให้ game engine |
 | `GET /api/config` | `stream_url`, `grafana_url`, `track_cm` |
 | `GET /api/players?limit=4` | ผู้เล่นล่าสุด `{"players":[{"name"}]}` |

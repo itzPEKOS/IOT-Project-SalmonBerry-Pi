@@ -20,8 +20,9 @@ class Clock:
 def make(**overrides):
     # test ทั่วไปไม่บังคับ sensor (sensors=()) test เรื่องเช็ก sensor ระบุเอง
     # และใช้ไฟสลับเองตามเวลา (lights="auto") test ของการกดปุ่มเปลี่ยนไฟระบุ lights="button" เอง
+    # drop_failed=False: ใช้ IMU ตัดสินเสมอ (test ทั่วไปไม่ได้ป้อน IMU ตอน calibrate)
     settings = dict(calib_s=5.0, green_s=(4.0, 4.0), transition_s=1.5, red_s=(3.0, 3.0), limit_s=60.0,
-                    intro_s=2.0, count_s=3.0, sensors=(), lights="auto")
+                    intro_s=2.0, count_s=3.0, sensors=(), lights="auto", drop_failed=False)
     settings.update(overrides)
     clock, out = Clock(), []
     engine = Engine(Config(**settings), publish=lambda topic, body, qos=0, retain=False: out.append(
@@ -113,19 +114,26 @@ def test_announce_clears_an_old_retained_state():
     assert (topic, body["state"], qos, retain) == (STATE, "IDLE", 1, True)
 
 
-def test_the_default_round_is_30_seconds_and_checks_wrist_heart_and_camera():
+def test_the_default_round_is_30_seconds_and_only_the_camera_is_required():
     config = Config()
     assert config.limit_s == 30.0
-    assert config.sensors == ("imu", "heart", "camera")
+    assert config.sensors == ("camera",)
+    assert "wrist-01" not in config.require
 
 
-def test_start_is_refused_until_the_screen_backend_camera_and_wrist_are_online():
+def test_start_is_refused_until_the_screen_backend_and_camera_are_online():
     engine, _, out = make()
     online(engine, "backend-01", "web-01")
     ok, reason = engine.command("start")
     assert not ok
-    assert "pi" in reason and "wrist-01" in reason
+    assert "pi" in reason and "wrist-01" not in reason
     assert sent(out, STATE) == []
+
+
+def test_the_wrist_is_not_needed_to_start():
+    engine, _, _ = make(require=Config.require)
+    online(engine, "backend-01", "web-01", "pi")
+    assert engine.command("start")[0]
 
 
 def test_the_pi_may_report_as_gateway_01():
@@ -481,7 +489,7 @@ def test_the_result_stays_until_the_next_round_starts():
 # ---------- ยกเลิกรอบ ----------
 
 @pytest.mark.parametrize("device, reason", [("web-01", "disconnect"), ("backend-01", "disconnect"),
-                                            ("wrist-01", "disconnect"), ("pi", "camera_lost")])
+                                            ("pi", "camera_lost")])
 def test_a_device_dropping_out_mid_round_aborts_it(device, reason):
     engine, clock, out = make()
     to_green(engine, clock, out)
@@ -497,8 +505,55 @@ def test_a_device_dropping_out_while_ready_also_aborts():
     engine, clock, out = make()
     start(engine, clock, out)
     run(engine, clock, 5.05)
-    online(engine, "wrist-01", status="offline")
+    online(engine, "pi", status="offline")
     assert (result(out)["result"], engine.state) == ("ABORTED", "IDLE")
+
+
+def test_the_wrist_dropping_out_does_not_stop_the_round():
+    engine, clock, out = make()
+    to_green(engine, clock, out)
+    online(engine, "wrist-01", status="offline")
+    engine.tick()
+    assert sent(out, RESULT) == [] and engine.state == "GREEN_LIGHT"
+
+
+# ---------- sensor ที่ไม่บังคับ ----------
+
+def test_a_missing_optional_sensor_still_lets_the_round_start():
+    engine, clock, out = make(sensors=("camera",))
+    start(engine, clock, out)
+    run_with_sensors(engine, clock, 5.05, imu=False, bpm=0)
+    assert engine.state == "READY"
+    final = sent(out, CALIBRATION)[-1]
+    assert (final["ok"], final["check_camera"], final["check_imu"], final["check_heart"]) == (1, "ok", "off", "off")
+    assert final["skipped"] == "imu,heart,distance,touch,station"
+
+
+def test_without_imu_at_calibrate_the_wrist_does_not_judge_red():
+    engine, clock, out = make(sensors=("camera",), drop_failed=True)
+    start(engine, clock, out)
+    run_with_sensors(engine, clock, 5.05, imu=False)
+    engine.command("start")
+    run(engine, clock, 5.0 + 5.55)
+    assert engine.state == "RED_LIGHT"
+    run(engine, clock, 0.5)
+    for _ in range(4):  # ค่าเพี้ยนจาก IMU ที่ calibrate ไม่ผ่าน ต้องไม่ทำให้แพ้
+        engine.message(IMU, {"acc_peak": 0.9, "gyro_rms": 150})
+    engine.tick()
+    assert sent(out, RESULT) == []
+
+
+def test_with_imu_at_calibrate_the_wrist_still_judges_red():
+    engine, clock, out = make(sensors=("camera",), drop_failed=True)
+    start(engine, clock, out)
+    run_with_sensors(engine, clock, 5.05)
+    engine.command("start")
+    run(engine, clock, 5.0 + 5.55)
+    run(engine, clock, 0.5)
+    engine.message(IMU, {"acc_peak": 0.9, "gyro_rms": 150})
+    engine.message(IMU, {"acc_peak": 0.9, "gyro_rms": 150})
+    engine.tick()
+    assert result(out)["reason"] == "imu"
 
 
 def test_the_operator_can_abort():

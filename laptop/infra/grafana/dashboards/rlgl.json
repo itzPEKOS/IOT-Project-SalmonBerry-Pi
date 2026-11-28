@@ -189,7 +189,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and (r._field == \"bpm\"))\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and (r._field == \"bpm\"))\n  |> filter(fn: (r) => r._value >= 45.0 and r._value <= 180.0)\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -333,7 +333,7 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "ชีพจร",
+      "title": "ชีพจร (เฉพาะค่า 45-180)",
       "datasource": {
         "type": "influxdb",
         "uid": "rlgl-influx"
@@ -351,7 +351,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and (r._field == \"bpm\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and (r._field == \"bpm\"))\n  |> filter(fn: (r) => r._value >= 45.0 and r._value <= 180.0)\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -363,7 +363,8 @@
             "showPoints": "never",
             "insertNulls": 5000,
             "spanNulls": false
-          }
+          },
+          "noValue": "ยังไม่มีชีพจรที่วัดได้ (ดูสัญญาณดิบด้านล่าง)"
         },
         "overrides": []
       }
@@ -593,18 +594,94 @@
     },
     {
       "id": 13,
+      "type": "timeseries",
+      "title": "ชีพจร: สัญญาณดิบ KY-039 (raw, 0-4095)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and (r._field == \"raw\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "raw",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "insertNulls": 5000,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "ชีพจร: ทุกค่า bpm ที่ ESP ส่ง (0 = วัดไม่ได้)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "rlgl-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "rlgl-influx"
+          },
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and (r._field == \"bpm\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "bpm",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "insertNulls": 5000,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
       "type": "row",
       "title": "ประวัติ (ตารางย้อนหลัง 7 วัน)",
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 33,
         "w": 24,
         "h": 1
       },
       "collapsed": false
     },
     {
-      "id": 14,
+      "id": 16,
       "type": "table",
       "title": "ผลแต่ละรอบ",
       "datasource": {
@@ -613,7 +690,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 34,
         "w": 12,
         "h": 9
       },
@@ -648,7 +725,7 @@
       "timeFrom": "7d"
     },
     {
-      "id": 15,
+      "id": 17,
       "type": "table",
       "title": "สรุปของรอบ",
       "datasource": {
@@ -657,7 +734,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 27,
+        "y": 34,
         "w": 12,
         "h": 9
       },
@@ -694,7 +771,7 @@
       "timeFrom": "7d"
     },
     {
-      "id": 16,
+      "id": 18,
       "type": "table",
       "title": "คลิปวิดีโอ",
       "datasource": {
@@ -703,7 +780,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 36,
+        "y": 43,
         "w": 12,
         "h": 8
       },
@@ -756,7 +833,7 @@
       "timeFrom": "7d"
     },
     {
-      "id": 17,
+      "id": 19,
       "type": "table",
       "title": "สถานะอุปกรณ์",
       "datasource": {
@@ -765,7 +842,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 36,
+        "y": 43,
         "w": 12,
         "h": 8
       },

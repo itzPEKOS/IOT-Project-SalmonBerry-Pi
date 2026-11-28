@@ -39,8 +39,10 @@ LAPTOP_DIR = WEB_DIR.parent
 BACKEND_ID, SCREEN_ID = "backend-01", "web-01"
 BACKEND_STATUS = f"rlgl/status/{BACKEND_ID}"
 SCREEN_STATUS = f"rlgl/status/{SCREEN_ID}"
-OWN_TOPICS = {SUMMARY, MEDIA, MODE, BACKEND_STATUS, SCREEN_STATUS}
+GAME_CMD = "rlgl/cmd/game"  # หน้าเว็บสั่ง game engine: calibrate / เริ่ม / เปลี่ยนไฟ / ยกเลิก
+OWN_TOPICS = {SUMMARY, MEDIA, MODE, BACKEND_STATUS, SCREEN_STATUS, GAME_CMD}
 GameMode = Literal["rlgl", "sniper"]
+# start = ปุ่มเดียวกับ joystick (calibrate / เริ่มเล่น / เปลี่ยนไฟ), touch = แตะเส้นชัยแทน sensor
 SERVER_PATHS = ("/api", "/clips", "/dev", "/ws", "/docs", "/redoc", "/openapi")  # ไม่ใช่ไฟล์หน้าเว็บ
 ROUND_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 CHUNK = 1024 * 1024
@@ -286,6 +288,10 @@ class ModeChoice(BaseModel):
     mode: GameMode
 
 
+class GameCommand(BaseModel):
+    cmd: Literal["start", "abort", "green", "red", "touch"]
+
+
 class DevMessage(BaseModel):
     topic: str
     payload: dict
@@ -443,6 +449,16 @@ def create_app(settings, publisher=None, clips=None):
     def session():
         stats = store.player_stats(hub.player_name, hub.mode) if hub.player_name else None
         return {"player": stats, "next_round_number": store.next_number(), "mode": hub.mode}
+
+    @app.post("/api/cmd")
+    async def game_command(body: GameCommand):
+        """ปุ่มบนหน้าเว็บ: ส่งต่อให้ game engine ทาง MQTT (engine ต้องเปิดอยู่)"""
+        if publisher is None and link is None:
+            raise HTTPException(503, "backend ไม่ได้ต่อ broker จึงส่งคำสั่งให้ game engine ไม่ได้")
+        if link is not None and not link.connected:
+            raise HTTPException(503, "ยังต่อ broker ไม่ได้ ลองใหม่อีกครั้ง")
+        hub.send(GAME_CMD, {"cmd": body.cmd})
+        return {"sent": body.cmd}
 
     @app.post("/api/mode")
     async def set_mode(body: ModeChoice):

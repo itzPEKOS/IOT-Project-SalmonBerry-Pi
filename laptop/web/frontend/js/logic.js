@@ -61,6 +61,33 @@ export function roundLimit(previous, remaining) {
   return Math.max(previous ?? ROUND_LIMIT_S, isNumber(remaining) ? remaining : 0);
 }
 
+/** ปุ่มคุมเกมของคนคุม ตาม state ตอนนี้ (cmd ส่งไป POST /api/cmd)
+ * start = ปุ่มเดียวกับ joystick: calibrate ใหม่ / เริ่มเล่น / เกม 1 สลับไฟ
+ * touchOk = sensor แตะเส้นชัยใช้ได้ไหม (ถ้าไม่ได้ มีปุ่ม FINISH ให้กดแทน) */
+export function controlsFor({ state, mode, touchOk }) {
+  const abort = { cmd: "abort", label: "ABORT", kind: "" };
+  const finish = touchOk ? [] : [{ cmd: "touch", label: "FINISH ⚑", kind: "" }];
+  switch (state) {
+    case "CALIBRATE":
+    case "COUNTDOWN":
+      return [abort];
+    case "CALIBRATE_FAILED":
+      return [{ cmd: "start", label: "CALIBRATE AGAIN", kind: "primary", key: "space" }, abort];
+    case "READY":
+      return [{ cmd: "start", label: "START ▶", kind: "primary", key: "space" }, abort];
+    case "GREEN_LIGHT":
+      return [{ cmd: "start", label: "RED LIGHT", kind: "red", key: "space" }, ...finish, abort];
+    case "TRANSITION":
+      return [{ cmd: "start", label: "TURNING RED…", kind: "red", disabled: true }, ...finish, abort];
+    case "RED_LIGHT":
+      return [{ cmd: "start", label: "GREEN LIGHT", kind: "green", key: "space" }, ...finish, abort];
+    case "SNIPER":
+      return [...finish, abort];
+    default:
+      return [];
+  }
+}
+
 export function partName(part) {
   return typeof part === "string" ? part.replaceAll("_", " ") : null;
 }

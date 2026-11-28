@@ -4,7 +4,7 @@
     python -m engine                   อ่าน IP ของ broker จาก infra/.env (RLGL_MQTT_HOST)
     python -m engine --host 172.20.10.2
     python -m engine --skip-checks     เริ่มรอบได้แม้อุปกรณ์และ sensor ยังไม่ครบ (ไว้ทดสอบ)
-    python -m engine --sensors imu,camera   ไม่บังคับชีพจร (ถ้า KY-039 วัดไม่ได้)
+    python -m engine --sensors camera,imu   บังคับ IMU ด้วย (ค่าเริ่มต้นบังคับแค่กล้อง ตัวอื่นใช้ไม่ได้ก็ยังเล่นต่อ)
     python -m engine --camera-only     ทดสอบกล้อง: ใช้กล้องตัดสินอย่างเดียว ไม่ต้องรอข้อมือ
     python -m engine --auto-lights     ไฟสลับเองตามเวลาสุ่ม (ไม่ต้องกดปุ่มเปลี่ยนไฟ)
 
@@ -63,7 +63,7 @@ def parse_args(env):
     p.add_argument("--no-console", action="store_true", help="ไม่รับคำสั่งจากคีย์บอร์ด (เริ่มรอบด้วยปุ่มบนสถานีเท่านั้น)")
     args = p.parse_args()
     if args.sensors is None:
-        args.sensors = "camera" if args.camera_only else "imu,heart,camera"
+        args.sensors = "camera"  # ตัวอื่นเช็กและแสดงผล แต่ใช้ไม่ได้ก็ยังเล่นต่อ
     names = [] if args.sensors.strip().lower() == "none" else [n.strip().lower() for n in args.sensors.split(",") if n.strip()]
     unknown = [n for n in names if n not in SENSORS]
     if unknown:
@@ -86,8 +86,7 @@ class Runner:
                         transition_s=args.transition, limit_s=args.limit, imu_acc_g=args.imu_acc,
                         imu_gyro_dps=args.imu_gyro, intro_s=args.intro, count_s=args.count,
                         sensors=() if args.skip_checks else args.sensors,
-                        require=() if args.skip_checks else
-                        tuple(d for d in Config.require if d != "wrist-01") if args.camera_only else Config.require,
+                        require=() if args.skip_checks else Config.require,
                         lights="auto" if args.auto_lights else "button",
                         judge=("camera",) if args.camera_only else Config.judge)
         self.engine = Engine(config, publish=self.publish)
