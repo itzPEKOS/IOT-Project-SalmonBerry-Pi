@@ -3,7 +3,7 @@
  *
  * Board   : ESP32-S3-N16R8 (บอร์ดเดียวกับ wrist)  ใช้ ESP32 รุ่นอื่นได้ แค่เปลี่ยนเลขขาด้านล่าง
  * Sensors : Ultrasonic HC-SR04  (TRIG -> GPIO5, ECHO -> GPIO6 ผ่านตัวแบ่งแรงดัน)
- *           ปุ่ม/เซนเซอร์สัมผัสที่เส้นชัย (TTP223 หรือ push button -> GPIO7)
+ *           เซนเซอร์สัมผัสโลหะ KY-036 ที่เส้นชัย (DO -> GPIO7)  ใช้ TTP223 / ปุ่มกด แทนได้
  *
  * Publish : rlgl/gateway/distance   10 Hz ตอนเล่น, 1 Hz ตอนว่าง
  *                                   {distance_cm, valid, round_id}
@@ -25,7 +25,11 @@
  *                          |
  *                         GND
  *            (ถ้าเป็นรุ่น HC-SR04P / RCWL-1601 ที่ใช้ 3.3V ได้ ต่อ VCC 3.3V แล้วต่อ ECHO ตรงได้)
- *   TTP223   VCC -> 3.3V, GND -> GND, I/O -> GPIO7   (แตะ = HIGH)  ตั้ง TOUCH_ACTIVE_HIGH = true
+ *   KY-036   + -> 3V3 (ห้ามใช้ 5V เพราะ DO จะออก 5V), G -> GND, D0 -> GPIO7, A0 ไม่ต้องต่อ
+ *            แตะปลายโลหะ = HIGH แต่สัญญาณจะกะพริบตามไฟบ้าน 50 Hz (ร่างกายรับคลื่นไฟฟ้ามา)
+ *            โค้ดนับว่า "ยังแตะอยู่" ถ้าเจอ HIGH ภายใน TOUCH_RELEASE_MS ล่าสุด
+ *            หมุน potentiometer บนโมดูลจนไฟ LED บนบอร์ดติดเฉพาะตอนแตะ  ตั้ง TOUCH_ACTIVE_HIGH = true
+ *   TTP223   VCC -> 3V3, GND -> GND, I/O -> GPIO7   (แตะ = HIGH)  ตั้ง TOUCH_ACTIVE_HIGH = true
  *   ปุ่มกด    ขาหนึ่ง -> GPIO7, อีกขา -> GND          (กด = LOW)   ตั้ง TOUCH_ACTIVE_HIGH = false
  *
  * Library : PubSubClient (by Nick O'Leary) — ติดตั้งจาก Library Manager
@@ -56,8 +60,9 @@ const int PIN_LED = RGB_BUILTIN;
 const int PIN_LED = 2;
 #endif
 
-const bool  TOUCH_ACTIVE_HIGH = true;   // TTP223 = true, ปุ่มกดลง GND = false
+const bool  TOUCH_ACTIVE_HIGH = true;   // KY-036 / TTP223 = true, ปุ่มกดลง GND = false
 const uint32_t TOUCH_DEBOUNCE_MS = 500; // แตะซ้ำภายในเวลานี้ไม่นับ
+const uint32_t TOUCH_RELEASE_MS  = 150; // ไม่เจอสัญญาณแตะนานเท่านี้ = ปล่อยมือแล้ว (ต้อง > 20 ms ของไฟ 50 Hz)
 
 const float DIST_MIN_CM = 2.0;          // HC-SR04 วัดได้ประมาณ 2-400 cm
 const float DIST_MAX_CM = 400.0;
@@ -99,6 +104,8 @@ uint32_t distSeq = 0, lastDistPubMs = 0;
 // ---- touch (จับเวลาใน interrupt ให้แม่นแม้ loop ติดตอนต่อ MQTT) ----
 volatile uint32_t touchEdgeMs = 0;
 volatile bool     touchEdge = false;
+volatile uint32_t touchLastActiveMs = 0;   // เจอสัญญาณแตะครั้งล่าสุด (KY-036 กะพริบ 50 Hz ระหว่างแตะ)
+volatile bool     touchHeld = false;       // กำลังแตะค้างอยู่ → ไม่นับเป็นการแตะใหม่
 uint32_t lastTouchMs = 0;
 uint32_t finishSeq = 0;
 int      pressCount = 0;        // จำนวนครั้งที่แตะในรอบนี้
@@ -177,9 +184,15 @@ void IRAM_ATTR onEcho() {
 
 void IRAM_ATTR onTouch() {
   bool active = digitalRead(PIN_TOUCH) == (TOUCH_ACTIVE_HIGH ? HIGH : LOW);
-  if (active && !touchEdge) {
-    touchEdgeMs = millis();
-    touchEdge = true;
+  if (!active) return;
+  uint32_t now = millis();
+  touchLastActiveMs = now;
+  if (!touchHeld) {            // เริ่มแตะใหม่ (ไม่ใช่สัญญาณกะพริบระหว่างแตะค้าง)
+    touchHeld = true;
+    if (!touchEdge) {
+      touchEdgeMs = now;
+      touchEdge = true;
+    }
   }
 }
 
@@ -270,6 +283,7 @@ void publishDistance(uint32_t nowMs) {
 //  Touch / finish
 // =============================================================
 void handleTouch() {
+  if (touchHeld && millis() - touchLastActiveMs > TOUCH_RELEASE_MS) touchHeld = false;  // ปล่อยมือแล้ว
   if (!touchEdge) return;
   uint32_t atMs = touchEdgeMs;                     // เวลาตอนแตะจริง (จาก interrupt)
   touchEdge = false;
