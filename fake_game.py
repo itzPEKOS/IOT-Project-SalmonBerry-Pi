@@ -36,7 +36,7 @@ def main():
     def wrap(data):
         nonlocal seq
         seq += 1
-        return json.dumps({"device_id": "game-sim", "seq": seq, "ts": int(time.time() * 1000), **data})
+        return json.dumps({"device_id": "game-01", "seq": seq, "ts": int(time.time() * 1000), **data})
 
     def on_connect(c, *a):
         c.subscribe([("rlgl/gateway/vision", 1), ("rlgl/status/#", 1), ("rlgl/gateway/replay", 1)])
@@ -53,7 +53,8 @@ def main():
             print(f"  [status] {msg.topic.split('/')[-1]}: {d.get('status')}")
             return
         if msg.topic == "rlgl/gateway/replay":
-            print(f"  [replay] round {d.get('round_id')} {d.get('result')} → {d.get('page') or d.get('url')}")
+            print(f"  [replay] round {d.get('round_id')} {d.get('result')} → {d.get('video_url') or d.get('page') or d.get('url')}"
+                  f"  (ขยับที่ {d.get('moved_at')} s ในคลิป)")
             return
         ev = d.get("event")
         if ev == "moved":
@@ -62,7 +63,7 @@ def main():
             print(f"  [vision] calibrated: noise x{d.get('noise_factor')} ok={d.get('ok')}")
         elif ev == "frame" and time.time() - last_print[0] > 0.5:
             last_print[0] = time.time()
-            print(f"  [vision] score={d.get('score')}  {d.get('part')}/{d.get('joint')}  valid={d.get('valid')}  fps={d.get('fps')}")
+            print(f"  [vision] score={d.get('motion_score', d.get('score'))}  {d.get('part')}/{d.get('joint')}  valid={d.get('valid')}  fps={d.get('fps')}")
 
     try:
         cli = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="game-sim")
@@ -76,7 +77,9 @@ def main():
         cli.publish("rlgl/game/state", wrap({"state": state, "round_id": rid, **extra}), qos=1, retain=True)
         print(f"[game] round {rid}: {state}")
 
-    rid = 1
+    stamp = time.strftime("%H%M%S")
+    n = 1
+    rid = f"r{stamp}_{n}"  # round_id ต้องไม่ซ้ำ (backend ใช้เป็นชื่อไฟล์คลิป)
     try:
         set_state("CALIBRATE", rid)
         time.sleep(args.calib)
@@ -91,13 +94,14 @@ def main():
                         break
                     time.sleep(0.05)
                 if state == "RED_LIGHT" and moved_event:
-                    res = {"result": "GAME_OVER", "cause": "camera", "part": moved_event.get("part"),
-                           "joint": moved_event.get("joint"), "score": moved_event.get("score")}
+                    res = {"result": "GAME_OVER", "reason": "camera", "cause": "camera", "part": moved_event.get("part"),
+                           "joint": moved_event.get("joint"), "score": moved_event.get("motion_score", moved_event.get("score"))}
                     cli.publish("rlgl/game/result", wrap({"round_id": rid, **res}), qos=1)
                     set_state("GAME_OVER", rid, **res)
                     print(f"[game] GAME OVER — {res['part']}/{res['joint']} score {res['score']}")
                     time.sleep(args.over)
-                    rid += 1
+                    n += 1
+                    rid = f"r{stamp}_{n}"
                     survived = 0
                     break
                 if state == "RED_LIGHT":
@@ -105,12 +109,13 @@ def main():
                     if args.win_after and survived >= args.win_after:
                         set_state("GREEN_LIGHT", rid, remaining_s=1.5)
                         time.sleep(1.5)  # เดินเข้าเส้นชัย
-                        res = {"result": "WIN", "cause": "finish", "red_lights": survived}
+                        res = {"result": "WIN", "reason": "touch", "cause": "finish", "red_lights": survived}
                         cli.publish("rlgl/game/result", wrap({"round_id": rid, **res}), qos=1)
                         set_state("WIN", rid, **res)
                         print(f"[game] WIN — survived {survived} red lights")
                         time.sleep(args.over)
-                        rid += 1
+                        n += 1
+                        rid = f"r{stamp}_{n}"
                         survived = 0
     except KeyboardInterrupt:
         pass
