@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Red Light · Green Light</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="page">
+  <header class="topbar">
+    <div class="brand">
+      <h1><span class="red">RED LIGHT</span> · <span class="green">GREEN LIGHT</span></h1>
+      <p id="subline">connecting…</p>
+    </div>
+    <nav class="tabs" aria-label="Main">
+      <button class="tab active" id="tab-live" data-tab="live">LIVE GAME</button>
+      <button class="tab" id="tab-board" data-tab="board">SCOREBOARD</button>
+    </nav>
+    <div class="chips" id="device-chips" aria-label="Devices">
+      <span class="chip" data-device="wrist-01"><i></i>ESP32 #1</span>
+      <span class="chip" data-device="station-01"><i></i>ESP32 #2</span>
+      <span class="chip" data-device="gateway-01"><i></i>PI 5</span>
+      <span class="chip" data-device="broker"><i></i>BROKER</span>
+    </div>
+  </header>
+
+  <!-- ===================== LIVE GAME ===================== -->
+  <main id="live" class="view">
+
+    <!-- 1) ใส่ชื่อ -->
+    <section id="v-setup" class="view" hidden>
+      <div class="stepper" data-stepper="1"></div>
+      <div class="setup-grid">
+        <div class="panel setup-main">
+          <div class="title-row"><span data-sprite="runner" data-scale="5"></span><h2 class="title-xl">WHO'S PLAYING?</h2></div>
+          <div class="label">GAME MODE</div>
+          <div class="mode-switch" role="group" aria-label="Game mode">
+            <button data-mode="rlgl">RED LIGHT GREEN LIGHT</button>
+            <button data-mode="sniper">SNIPER</button>
+          </div>
+          <label class="label" for="name">ENTER YOUR NAME</label>
+          <div class="name-input">
+            <input id="name" maxlength="10" autocomplete="off" spellcheck="false" placeholder="NAME">
+          </div>
+          <div class="small muted" id="name-hint">Up to 10 letters or numbers (A-Z 0-9 _ -) · shown on the scoreboard</div>
+          <div class="label" id="recent-label">RECENT PLAYERS</div>
+          <div class="chip-row" id="recent"></div>
+          <div class="notice" id="welcome" hidden>
+            <div class="label green" id="welcome-title"></div>
+            <div id="welcome-text"></div>
+          </div>
+          <div class="notice red" id="cancelled" hidden>
+            <div class="label red">ROUND CANCELLED</div>
+            <div id="cancelled-text"></div>
+          </div>
+          <div class="spacer"></div>
+          <div class="actions">
+            <button class="btn primary" id="name-go">NEXT: CALIBRATE ▶</button>
+            <span class="small muted" id="name-status">Press ENTER</span>
+            <button class="link" id="guest">PLAY WITHOUT A NAME</button>
+          </div>
+        </div>
+        <div class="side">
+          <div class="panel how">
+            <h3 class="title-m yellow">HOW TO PLAY</h3>
+            <div id="how"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><span class="label">DEVICE CHECK</span><span class="label" id="device-summary"></span></div>
+            <div class="chips" id="device-chips-2"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2) calibrate -->
+    <section id="v-calibrate" class="view" hidden>
+      <div class="stepper" data-stepper="2"></div>
+      <div class="cam-grid">
+        <div class="panel cam-panel">
+          <div class="panel-head"><span class="label">STAND STILL · WHOLE BODY IN VIEW</span><span class="label red">PI 5 CAMERA · LIVE</span></div>
+          <div class="cam" data-stream>
+            <span class="badge warn" id="cal-badge">WAITING FOR THE PI</span>
+            <div class="hold" id="cal-hold" hidden><div class="label yellow">HOLD STILL</div><div class="n" id="cal-left">-</div><div class="small muted">seconds left</div></div>
+          </div>
+          <div class="actions"><span class="label cyan">CALIBRATING</span><div class="segbar cyan" id="cal-bar" style="flex:1"></div><span class="label cyan" id="cal-pct">--%</span></div>
+        </div>
+        <div class="panel">
+          <h3 class="title-m" style="margin-bottom:18px">CALIBRATION CHECKS</h3>
+          <div class="checks" id="checks"></div>
+          <p class="small muted" style="margin-top:18px">Operator: press START on the joystick when all checks are green</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3) ไฟเขียว / แดง -->
+    <section id="v-play" class="view" hidden>
+      <div class="play-top">
+        <div class="banner green" id="play-banner">
+          <div class="light on-g" id="play-light"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+          <div><h2 id="play-title">GREEN LIGHT</h2><p id="play-sub">Walk to the finish</p></div>
+        </div>
+        <div class="panel">
+          <div class="label">TIME LEFT</div>
+          <div class="big-time" id="play-time">--:--</div>
+          <div class="segbar" id="play-timebar"></div>
+          <p class="small muted" style="margin:12px 0 0">Round limit 60 s</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="label">DISTANCE TO FINISH</span><span class="title-l" id="play-dist">-- m</span></div>
+        <div class="track" id="play-track"></div>
+        <div class="actions"><div class="segbar green tall" id="play-distbar" style="flex:1"></div><span class="title-l green" id="play-pct">--%</span></div>
+      </div>
+      <div class="panel heart-row" data-heart>
+      </div>
+    </section>
+
+    <!-- 4) sniper -->
+    <section id="v-sniper" class="view" hidden>
+      <div class="sniper-grid">
+        <div class="panel cam-panel">
+          <div class="panel-head"><span class="label">OPERATOR SCOPE · PI 5 CAMERA</span><span class="label red">AIM WITH JOYSTICK</span></div>
+          <div class="scope" data-stream>
+            <div class="xh-h"></div><div class="xh-v"></div>
+            <div class="hitbox" id="sn-box"><span class="hitbox-label">HIT ZONE</span></div>
+            <div class="tl"><span class="lock-tag safe" id="sn-tag">SAFE</span></div>
+            <div class="tr"><span id="sn-pan">PAN --°</span><span id="sn-tilt">TILT --°</span></div>
+            <div class="bl label yellow" id="sn-offset"></div>
+          </div>
+          <div class="actions"><span class="label yellow">LOCK-ON</span><div class="segbar tall" id="sn-lockbar" style="flex:1"></div><span class="label red" id="sn-lock">0.0 / 1.0 s</span></div>
+        </div>
+        <div class="side">
+          <div class="alert green" id="sn-alert"><h2 id="sn-alert-title">SAFE</h2><div id="sn-alert-text">Keep moving to the button</div></div>
+          <div class="panel">
+            <div class="panel-head"><span class="label">LIVES</span><span class="label red" id="sn-hits">0 HITS TAKEN</span></div>
+            <div class="lives" id="sn-lives"></div>
+          </div>
+          <div class="two">
+            <div class="panel"><div class="label">TIME LEFT</div><div class="stat-big yellow" id="sn-time">--:--</div><div class="small muted">limit 60 s</div></div>
+            <div class="panel"><div class="label">DODGES</div><div class="stat-big cyan" id="sn-dodges">-</div><div class="small muted">from wrist IMU</div></div>
+          </div>
+          <div class="panel heart-row" data-heart data-compact></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="label">DISTANCE TO BUTTON</span><span class="title-l" id="sn-dist">-- m</span></div>
+        <div class="actions"><div class="segbar green tall" id="sn-distbar" style="flex:1"></div><span class="btn danger" style="padding:6px 10px;box-shadow:none">BTN</span></div>
+      </div>
+    </section>
+
+    <!-- 5) ผลรอบ -->
+    <section id="v-result" class="view" hidden>
+      <div class="result-banner win" id="res-banner">
+        <span id="res-sprite"></span>
+        <div>
+          <h2 id="res-title">YOU WIN!</h2>
+          <div id="res-sub" class="small" style="margin-top:8px"></div>
+          <span class="ribbon" id="res-ribbon" hidden></span>
+        </div>
+        <div class="right"><div class="label" id="res-time-label">FINISH TIME</div><div class="t" id="res-time">--:--.-</div></div>
+      </div>
+      <div class="cards" id="res-cards"></div>
+      <div class="result-grid">
+        <div class="panel">
+          <div class="panel-head"><span class="title-m" id="tl-title">ROUND TIMELINE</span><button class="btn" id="tl-replay" disabled>▶ PLAY REPLAY</button></div>
+          <canvas class="timeline" id="tl-canvas"></canvas>
+          <div class="legend" id="tl-legend"></div>
+          <div class="empty" id="tl-empty" hidden>Timeline needs the page to be open for the whole round.</div>
+        </div>
+        <div class="panel">
+          <h3 class="title-m yellow" style="margin-bottom:14px">WHAT HAPPENED</h3>
+          <div class="happened" id="res-happened"></div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="res-again">PLAY AGAIN</button>
+        <button class="btn" id="res-board">VIEW SCOREBOARD</button>
+        <button class="btn" id="res-replay" disabled>WATCH REPLAY</button>
+        <span class="small muted" id="res-video-status">Waiting for the replay from the Pi…</span>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===================== SCOREBOARD ===================== -->
+  <main id="board" class="view" hidden>
+    <div class="subtabs">
+      <button class="subtab active" data-sub="overview">OVERVIEW</button>
+      <button class="subtab" data-sub="history">ROUND HISTORY</button>
+      <button class="subtab" data-sub="detail" id="sub-detail">LAST ROUND</button>
+    </div>
+
+    <section id="b-overview" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <div><h3 class="title-m yellow"><span data-sprite="flag" data-scale="2"></span> FASTEST FINISH · TOP 7</h3>
+            <div class="small muted" id="lb-hint" style="margin-top:6px">Wins only · time from GREEN to touching the finish sensor</div></div>
+          <div class="filters" id="lb-modes">
+            <button class="filter active" data-lb="rlgl">RED LIGHT</button>
+            <button class="filter" data-lb="sniper">SNIPER</button>
+          </div>
+        </div>
+        <div class="board-list" id="lb"></div>
+      </div>
+      <div class="two-cards">
+        <div class="link-card" id="last-card">
+          <div><div class="label red" id="last-label">LAST ROUND</div><h3 id="last-title">No rounds yet</h3><div class="small muted" id="last-text"></div></div>
+          <button class="btn danger" id="last-open" disabled>WATCH REPLAY ▶</button>
+        </div>
+        <div class="link-card cyan">
+          <div><div class="label cyan">ROUND HISTORY</div><h3 id="hist-count">0 rounds played</h3><div class="small muted">Every win, loss, cause and replay</div></div>
+          <button class="btn" id="hist-open">OPEN HISTORY ▶</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="b-history" class="view" hidden>
+      <div class="panel">
+        <div class="panel-head"><h3 class="title-m">ROUND HISTORY</h3><span class="small muted">Click REPLAY on any round to see what happened</span></div>
+        <div class="panel-head">
+          <div class="filters" id="h-results">
+            <button class="filter active" data-result="all">ALL</button>
+            <button class="filter" data-result="win">WINS</button>
+            <button class="filter" data-result="loss">LOSSES</button>
+          </div>
+          <div class="filters" id="h-modes">
+            <button class="filter active" data-hmode="">ALL MODES</button>
+            <button class="filter" data-hmode="rlgl">RED LIGHT</button>
+            <button class="filter" data-hmode="sniper">SNIPER</button>
+          </div>
+        </div>
+        <table class="history">
+          <thead><tr><th>ROUND</th><th>PLAYER</th><th>RESULT</th><th>TIME</th><th>MAX BPM</th><th>CAUSE</th><th></th></tr></thead>
+          <tbody id="h-rows"></tbody>
+        </table>
+        <div class="pager"><span class="small muted" id="h-showing"></span><div class="pages" id="h-pages"></div></div>
+      </div>
+    </section>
+
+    <section id="b-detail" class="view" hidden>
+      <div><button class="link" id="d-back">◀ BACK TO HISTORY</button></div>
+      <div class="actions"><h2 class="title-l" id="d-title">ROUND</h2><span class="small muted" id="d-sub"></span></div>
+      <div class="detail-grid">
+        <div class="panel">
+          <div class="panel-head"><span class="label">REPLAY · WHERE DID YOU MOVE?</span><span class="label">MP4 · H.264</span></div>
+          <div class="player">
+            <video id="d-video" playsinline preload="metadata"></video>
+            <div class="empty" id="d-novideo" hidden>No replay for this round (the Pi did not upload a clip).</div>
+          </div>
+          <div class="actions" style="margin-top:16px">
+            <button class="btn" id="d-play">▶ PLAY</button>
+            <button class="btn danger" id="d-jump">JUMP TO DECISION</button>
+            <button class="btn" id="d-slow">SLOW-MO 0.25×</button>
+            <span class="small muted">clip = the whole round + 2 s after the end</span>
+          </div>
+        </div>
+        <div class="panel" style="display:flex;flex-direction:column;gap:14px">
+          <h2 class="title-xl" id="d-result">GAME OVER</h2>
+          <div id="d-sentence"></div>
+          <div class="cause-box" id="d-cause"></div>
+          <div class="mini" id="d-mini"></div>
+          <div class="actions"><button class="btn primary" id="d-again">PLAY AGAIN</button><a class="btn" id="d-grafana" target="_blank" rel="noopener">OPEN GRAFANA</a></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="overlay" id="offline" hidden>
+  <div class="box">
+    <h2>DISCONNECTED</h2>
+    <p class="title-m" style="margin-bottom:14px">STOP · DO NOT MOVE</p>
+    <p class="muted">This screen lost the game server. The round is not valid until the screen reconnects.</p>
+    <p class="small muted" id="offline-detail">Reconnecting…</p>
+  </div>
+</div>
+
+<div class="overlay modal" id="video-modal" hidden>
+  <div class="box">
+    <video id="modal-video" controls playsinline></video>
+    <div class="actions" style="justify-content:space-between">
+      <button class="btn" id="modal-slow">SLOW-MO 0.25×</button>
+      <button class="btn primary" id="modal-close">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

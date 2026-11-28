@@ -1,3 +1,5 @@
+import pytest
+
 from backend.tracker import GameTracker
 
 
@@ -179,3 +181,49 @@ def test_value_is_left_out_if_every_red_sample_was_at_the_boundary():
         (0, state("RED_LIGHT")), (1.0, imu(0.4)), (0.02, state("GREEN_LIGHT")), (1.0, result()),
     )
     assert "red_acc_peak_max" not in summary
+
+
+# ---------- ข้อมูลที่หน้าประวัติและหน้าผลต้องใช้ ----------
+
+def distance(cm):
+    return "rlgl/gateway/distance", {"distance_cm": cm}
+
+
+@pytest.mark.parametrize("last_state", ["GREEN_LIGHT", "TRANSITION"])
+@pytest.mark.parametrize("final_state_first", [True, False])
+def test_summary_says_in_which_light_the_finish_was_touched(last_state, final_state_first):
+    ending = [state("WIN"), result(outcome="WIN", reason="touch")]
+    if not final_state_first:
+        ending.reverse()
+    out = feed(GameTracker(), state("RED_LIGHT"), state("GREEN_LIGHT"), state(last_state), *ending)
+    assert out[0][1]["finish_state"] == last_state
+
+
+def test_touching_the_finish_on_red_is_a_finish_state_too():
+    out = feed(GameTracker(), state("RED_LIGHT"), state("GAME_OVER"), result(reason="finish_during_red"))
+    assert out[0][1]["finish_state"] == "RED_LIGHT"
+
+
+def test_a_loss_without_touching_the_finish_has_no_finish_state():
+    out = feed(GameTracker(), state("RED_LIGHT"), result(reason="camera"))
+    assert "finish_state" not in out[0][1]
+
+
+def test_summary_keeps_the_last_distance_measured_while_playing():
+    out = feed(GameTracker(), state("CALIBRATE"), distance(400), state("GREEN_LIGHT"), distance(220),
+               distance("far"), state("RED_LIGHT"), distance(190.5), state("GAME_OVER"), distance(10), result())
+    assert out[0][1]["distance_cm"] == 190.5
+
+
+def test_closest_call_is_the_highest_score_ratio_on_red_only():
+    def ratio(value):
+        return "rlgl/gateway/vision", {"motion_score": 0.01, "score_ratio": value}
+
+    out = feed(GameTracker(), state("GREEN_LIGHT"), ratio(9.0), state("RED_LIGHT"), ratio(0.4),
+               ratio(0.74), ratio(0.2), result(outcome="WIN", reason="touch"))
+    assert out[0][1]["closest_call"] == 0.74
+
+
+def test_distance_and_closest_call_are_left_out_without_data():
+    summary = feed(GameTracker(), state("RED_LIGHT"), vision(0.2), result())[0][1]
+    assert "distance_cm" not in summary and "closest_call" not in summary

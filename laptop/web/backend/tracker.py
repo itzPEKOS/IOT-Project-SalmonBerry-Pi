@@ -7,12 +7,15 @@ STATE = "rlgl/game/state"
 RESULT = "rlgl/game/result"
 SUMMARY = "rlgl/game/summary"
 MEDIA = "rlgl/game/media"
+MODE = "rlgl/game/mode"
 HEARTRATE = "rlgl/wrist/heartrate"
 IMU = "rlgl/wrist/imu"
 VISION = "rlgl/gateway/vision"
+DISTANCE = "rlgl/gateway/distance"
 
 BPM_MIN, BPM_MAX = 45, 180
-PLAYING = {"GREEN_LIGHT", "TRANSITION", "RED_LIGHT"}
+# SNIPER = กำลังเล่นโหมด sniper (ไม่มีไฟเขียว/แดง)
+PLAYING = {"GREEN_LIGHT", "TRANSITION", "RED_LIGHT", "SNIPER"}
 # ผู้เล่นเริ่มเดินทันทีที่ไฟเขียว และค่าจากข้อมืออาจมาถึงก่อน state ใหม่ (คนละอุปกรณ์)
 # สรุปรอบจึงไม่นับค่าข้อมือที่มาถึงภายในช่วงนี้ก่อนเปลี่ยนจากไฟแดงเป็นไฟเขียว
 GREEN_EDGE_MARGIN_S = 0.2
@@ -34,6 +37,9 @@ class RoundNumbers:
     red_motion_max: float | None = None
     red_acc_peak_max: float | None = None
     red_light_count: int = 0
+    closest_call: float | None = None  # คะแนนการขยับเทียบเกณฑ์ที่สูงสุดตอนไฟแดง (1.0 = ถึงเกณฑ์)
+    distance_cm: float | None = None
+    last_playing_state: str | None = None
     red_acc_recent: list = field(default_factory=list)  # (เวลาที่มาถึง, ค่า) ที่ยังตัดสินไม่ได้ว่าอยู่รอยต่อไหม
 
 
@@ -68,6 +74,10 @@ class GameTracker:
             self._on_state(payload)
         elif topic == VISION and self.state == "RED_LIGHT":
             self.numbers.red_motion_max = _highest(self.numbers.red_motion_max, payload.get("motion_score"))
+            self.numbers.closest_call = _highest(self.numbers.closest_call, payload.get("score_ratio"))
+        elif topic == DISTANCE and self.state in PLAYING:
+            if is_number(payload.get("distance_cm")):
+                self.numbers.distance_cm = payload["distance_cm"]
         elif topic == IMU and self.state == "RED_LIGHT":
             # ใช้เวลาตอนรับข้อความ: ค่าที่วัดช่วงผ่อนผันแต่มาถึงช้าอาจถูกนับรวม
             self._hold_red_sample(payload.get("acc_peak"))
@@ -92,6 +102,8 @@ class GameTracker:
         if state == "RED_LIGHT" and self.state != "RED_LIGHT":
             self.numbers.red_light_count += 1
         self.state = state
+        if state in PLAYING:
+            self.numbers.last_playing_state = state
 
     def _hold_red_sample(self, value):
         now = self.clock()
@@ -125,4 +137,10 @@ class GameTracker:
             summary["red_motion_max"] = numbers.red_motion_max
         if numbers.red_acc_peak_max is not None:
             summary["red_acc_peak_max"] = numbers.red_acc_peak_max
+        for key in ("closest_call", "distance_cm"):
+            if getattr(numbers, key) is not None:
+                summary[key] = getattr(numbers, key)
+        touched = result.get("result") == "WIN" or result.get("reason") == "finish_during_red"
+        if touched and numbers.last_playing_state:
+            summary["finish_state"] = numbers.last_playing_state
         return [(SUMMARY, summary)]
