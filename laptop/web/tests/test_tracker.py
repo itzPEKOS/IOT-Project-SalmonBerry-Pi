@@ -224,6 +224,19 @@ def test_closest_call_is_the_highest_score_ratio_on_red_only():
     assert out[0][1]["closest_call"] == 0.74
 
 
+def test_the_pi_field_names_score_and_raw_are_used_too():
+    # pi_client.py ส่ง score (เทียบเกณฑ์, 1.0 = ถึงเกณฑ์) และ raw (ระยะเลื่อน / ความยาวลำตัว)
+    def frame(score, raw):
+        return "rlgl/gateway/vision", {"event": "frame", "score": score, "raw": raw, "valid": True}
+
+    out = feed(GameTracker(), state("GREEN_LIGHT"), frame(5.0, 0.9), state("RED_LIGHT"),
+               frame(0.31, 0.012), frame(0.66, 0.027), frame(None, None),
+               ("rlgl/gateway/vision", {"event": "heartbeat", "fps": 14.8}), result())
+    summary = out[0][1]
+    assert summary["closest_call"] == 0.66
+    assert summary["red_motion_max"] == 0.027
+
+
 def test_distance_and_closest_call_are_left_out_without_data():
     summary = feed(GameTracker(), state("RED_LIGHT"), vision(0.2), result())[0][1]
     assert "distance_cm" not in summary and "closest_call" not in summary

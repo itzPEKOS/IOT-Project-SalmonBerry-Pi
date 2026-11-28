@@ -1,8 +1,12 @@
 """กติกาของเกม (ไม่ผูกกับ MQTT): รับข้อความจากอุปกรณ์ ตัดสินแพ้ชนะ แล้วส่ง state และผลออกทาง publish
 
-โหมด rlgl:   IDLE → CALIBRATE → (GREEN_LIGHT → TRANSITION → RED_LIGHT)… → WIN / GAME_OVER
-โหมด sniper: IDLE → CALIBRATE → SNIPER → WIN / GAME_OVER
-WIN / GAME_OVER ค้างจนรอบถัดไปเริ่ม (กลับไป CALIBRATE) ยกเลิกรอบ (ABORTED) แล้วกลับ IDLE ทันที
+กดปุ่มครั้งแรก:  IDLE → CALIBRATE (ยืนนิ่ง + เช็ก sensor)
+                  ├─ ผ่าน → READY
+                  └─ ไม่ผ่าน → CALIBRATE_FAILED (กดอีกครั้ง = calibrate ใหม่ รอบเดิม)
+กดปุ่มครั้งที่สอง: READY → COUNTDOWN (animation + นับ 3-2-1) → เล่น
+โหมด rlgl:   GREEN_LIGHT → TRANSITION → RED_LIGHT → GREEN_LIGHT … → WIN / GAME_OVER
+โหมด sniper: SNIPER → WIN / GAME_OVER
+WIN / GAME_OVER ค้างจนรอบถัดไปเริ่ม ยกเลิกรอบ (ABORTED) แล้วกลับ IDLE ทันที
 
 เวลาทั้งหมดเป็นวินาทีจาก clock() (ค่าเริ่มต้น time.time) และรอบเดินด้วยการเรียก tick() ถี่ๆ (เช่น 20 ครั้ง/วินาที)
 """
@@ -16,20 +20,24 @@ CALIBRATION = "rlgl/game/calibration"
 MODE = "rlgl/game/mode"
 VISION = "rlgl/gateway/vision"
 FINISH = "rlgl/gateway/finish"
+DISTANCE = "rlgl/gateway/distance"
 IMU = "rlgl/wrist/imu"
 HEARTRATE = "rlgl/wrist/heartrate"
 BUTTON = "rlgl/station/button"
 AIM = "rlgl/sniper/aim"
 CMD = "rlgl/cmd/game"
 STATUS_PREFIX = "rlgl/status/"
-SUBSCRIPTIONS = [MODE, VISION, FINISH, IMU, HEARTRATE, BUTTON, AIM, CMD, STATUS_PREFIX + "+"]
+SUBSCRIPTIONS = [MODE, VISION, FINISH, DISTANCE, IMU, HEARTRATE, BUTTON, AIM, CMD, STATUS_PREFIX + "+"]
 
 MODES = ("rlgl", "sniper")
 # สคริปต์บน Pi รายงานสถานะเป็น rlgl/status/pi (pi_client.py) ตาม contract คือ gateway-01 รับทั้งสองชื่อ
 CAMERA_IDS = ("pi", "gateway-01")
+STATION_ID = "station-01"
 DEFAULT_REQUIRE = ("backend-01", "web-01", "pi", "wrist-01")
+# sensor ที่เช็กตอน calibrate: imu, heart = ESP ข้อมือ / camera, distance = Pi / station = ESP สถานี (joystick, servo)
+SENSORS = ("imu", "heart", "camera", "distance", "station")
 PLAYING = ("GREEN_LIGHT", "TRANSITION", "RED_LIGHT", "SNIPER")
-ACTIVE = ("CALIBRATE", *PLAYING)
+ACTIVE = ("CALIBRATE", "CALIBRATE_FAILED", "READY", "COUNTDOWN", *PLAYING)
 BPM_MIN, BPM_MAX = 45, 180
 EPS = 1e-3  # กันเวลาทศนิยมคลาดนิดเดียว (epoch วินาทีมีเลขหลักใหญ่) แล้วเปลี่ยนไฟช้าไปหนึ่ง tick
 
@@ -37,10 +45,12 @@ EPS = 1e-3  # กันเวลาทศนิยมคลาดนิดเด
 @dataclass
 class Config:
     calib_s: float = 5.0
+    intro_s: float = 2.0             # animation ก่อนนับถอยหลัง
+    count_s: float = 3.0             # นับ 3-2-1
     green_s: tuple = (3.0, 6.0)      # สุ่มความยาวไฟเขียวในช่วงนี้ (ผู้เล่นเดาจังหวะไม่ได้)
     transition_s: float = 1.5        # กล้องหัน = ช่วงผ่อนผัน ยังไม่จับ
     red_s: tuple = (3.0, 5.0)
-    limit_s: float = 60.0            # เวลาเล่นทั้งรอบ นับจากไฟเขียวแรก (sniper: จากเริ่ม SNIPER)
+    limit_s: float = 30.0            # เวลาเล่นทั้งรอบ นับจากไฟเขียวแรก (sniper: จากเริ่ม SNIPER)
     imu_acc_g: float = 0.3           # ไฟแดง: acc_peak เกินนี้ = ขยับ
     imu_gyro_dps: float = 50.0       # ไฟแดง: gyro_rms เกินนี้ = ขยับ
     imu_samples: int = 2             # ต้องเกินติดกันกี่ค่า (ESP ส่ง 20 ค่า/วินาที)
@@ -50,6 +60,9 @@ class Config:
     dodge_acc_g: float = 0.6         # sniper: acc_peak เกินนี้ = หลบ 1 ครั้ง
     dodge_gap_s: float = 0.5         # sniper: หลบสองครั้งต้องห่างกันอย่างน้อยเท่านี้
     require: tuple = DEFAULT_REQUIRE  # อุปกรณ์ที่ต้อง online ก่อนเริ่ม และถ้าหลุดระหว่างเล่นจะยกเลิกรอบ
+    sensors: tuple = ("imu", "heart", "camera")  # sensor ที่ต้องส่งข้อมูลจริงตอน calibrate ถึงจะเล่นได้
+    imu_min_samples: int = 20        # calibrate: ต้องได้ IMU อย่างน้อยกี่ค่า
+    camera_fresh_s: float = 2.0      # calibrate: กล้องต้องเห็นผู้เล่นภายในกี่วินาทีล่าสุด
 
 
 def _number(value):
@@ -67,6 +80,7 @@ class Engine:
         self.state = "IDLE"
         self.round_id = None
         self.last_round_id = 0
+        self.player_seen_at = None  # เก็บข้ามรอบ: Pi ส่ง heartbeat ตลอด
         self._clear_round()
 
     def _clear_round(self):
@@ -74,8 +88,9 @@ class Engine:
         self.started = self.play_t0 = self.phase_end = self.red_t0 = None
         self.ended_elapsed = None
         self.next_state_at = self.next_calibration_at = None
-        self.bpm_rest = []
-        self.player_seen_at = None
+        self.calib_t0 = None
+        self.failed = []
+        self._clear_sensor_counts()
         self.imu_streak = 0
         self.caught = None      # ข้อความ moved จากกล้องในไฟแดงนี้
         self.imu_moved = False
@@ -84,6 +99,11 @@ class Engine:
         self.locked = False
         self.last_dodge = None
         self.dodge_armed = True
+
+    def _clear_sensor_counts(self):
+        self.bpm_rest = []
+        self.imu_count = 0
+        self.distance_count = 0
 
     # ---------- ข้อความเข้า ----------
 
@@ -104,6 +124,9 @@ class Engine:
             bpm = payload.get("bpm")
             if self.state == "CALIBRATE" and _number(bpm) and BPM_MIN <= bpm <= BPM_MAX:
                 self.bpm_rest.append(bpm)
+        elif topic == DISTANCE:
+            if self.state == "CALIBRATE" and _number(payload.get("distance_cm")):
+                self.distance_count += 1
         elif topic == VISION:
             self._on_vision(payload, now)
         elif topic == IMU:
@@ -138,6 +161,9 @@ class Engine:
             self.caught = payload
 
     def _on_imu(self, payload, now):
+        if self.state == "CALIBRATE":
+            self.imu_count += 1
+            return
         acc, gyro = payload.get("acc_peak"), payload.get("gyro_rms")
         acc = acc if _number(acc) else 0.0
         gyro = gyro if _number(gyro) else 0.0
@@ -180,6 +206,34 @@ class Engine:
         self.lives -= 1
         self._send_state()  # contract: ส่งทันทีเมื่อโดนยิง
 
+    # ---------- เช็ก sensor ----------
+
+    def _sensor_ok(self, name, now):
+        if name == "imu":
+            return self.imu_count >= self.c.imu_min_samples
+        if name == "heart":
+            return bool(self.bpm_rest)
+        if name == "camera":
+            return self.player_seen_at is not None and now - self.player_seen_at <= self.c.camera_fresh_s
+        if name == "distance":
+            return self.distance_count > 0
+        if name == "station":
+            return bool(self.devices.get(STATION_ID))
+        return False
+
+    def sensor_checks(self, done):
+        """{ชื่อ sensor: ok / wait (ยังไม่ครบ) / fail (calibrate จบแล้วยังไม่ครบ) / off (ไม่บังคับและไม่มีข้อมูล)}"""
+        now = self.clock()
+        checks = {}
+        for name in SENSORS:
+            if self._sensor_ok(name, now):
+                checks[name] = "ok"
+            elif name in self.c.sensors:
+                checks[name] = "fail" if done else "wait"
+            else:
+                checks[name] = "off"
+        return checks
+
     # ---------- คำสั่ง ----------
 
     def missing(self):
@@ -194,18 +248,29 @@ class Engine:
     def command(self, name):
         """คืน (สำเร็จไหม, round_id หรือเหตุผลที่ทำไม่ได้)"""
         if name == "start":
-            if self.state in ACTIVE:
-                return False, f"กำลังเล่นรอบ {self.round_id} อยู่"
-            missing = self.missing()
-            if missing:
-                return False, "ยังไม่ online: " + ", ".join(missing)
-            return True, self._begin()
+            return self._press()
         if name == "abort":
             return self.abort("operator")
         if name == "touch":
             self.message(FINISH, {"touched": 1})
             return True, self.round_id
         return False, f"ไม่รู้จักคำสั่ง {name}"
+
+    def _press(self):
+        """ปุ่มเดียว: เริ่ม calibrate / calibrate ใหม่ / เริ่มนับถอยหลัง ตาม state ตอนนี้"""
+        if self.state == "READY":
+            self._set("COUNTDOWN", self.c.intro_s + self.c.count_s)
+            return True, self.round_id
+        if self.state not in ("IDLE", "WIN", "GAME_OVER", "CALIBRATE_FAILED"):
+            return False, f"กำลัง {self.state} รอบ {self.round_id} อยู่"
+        missing = self.missing()
+        if missing:
+            return False, "ยังไม่ online: " + ", ".join(missing)
+        if self.state == "CALIBRATE_FAILED":
+            self._calibrate()  # รอบเดิม: ยังไม่ได้เริ่มเล่น
+        else:
+            self._begin()
+        return True, self.round_id
 
     def abort(self, reason):
         """ยกเลิกรอบที่กำลังเล่น เช่น reason = operator หรือ disconnect (หลุดจาก broker)"""
@@ -227,9 +292,15 @@ class Engine:
         self.last_round_id = self.round_id
         self._clear_round()
         self.started = now
+        self._calibrate()
+
+    def _calibrate(self):
+        now = self.clock()
+        self._clear_sensor_counts()
+        self.failed = []
+        self.calib_t0 = now
         self.next_calibration_at = now
         self._set("CALIBRATE", self.c.calib_s)
-        return self.round_id
 
     def _set(self, state, duration=None):
         now = self.clock()
@@ -244,12 +315,12 @@ class Engine:
         now = self.clock()
         if self.state not in ACTIVE:
             return
-        if self._judge(now):
+        if self.state in PLAYING and self._judge(now):
             return
         if self.phase_end is not None and now >= self.phase_end - EPS:
             self._next_phase()
         elif self.state == "CALIBRATE" and now >= self.next_calibration_at - EPS:
-            self._send_calibration(now, min(1.0, (now - self.started) / self.c.calib_s))
+            self._send_calibration(min(1.0, (now - self.calib_t0) / self.c.calib_s), done=False)
             self.next_calibration_at += 0.5
         if now >= self.next_state_at - EPS:
             self._send_state()
@@ -274,7 +345,11 @@ class Engine:
 
     def _next_phase(self):
         if self.state == "CALIBRATE":
-            self._send_calibration(self.clock(), 1.0)
+            checks = self.sensor_checks(done=True)
+            self.failed = [name for name in SENSORS if checks[name] == "fail"]
+            self._send_calibration(1.0, done=True, checks=checks)
+            self._set("CALIBRATE_FAILED" if self.failed else "READY")
+        elif self.state == "COUNTDOWN":
             self.play_t0 = self.clock()
             if self.round_mode == "sniper":
                 self._set("SNIPER")
@@ -297,20 +372,34 @@ class Engine:
     # ---------- ข้อความออก ----------
 
     def _send_state(self, **extra):
+        now = self.clock()
         body = {"round_id": self.round_id, "mode": self.round_mode if self.round_id else self.mode,
                 "state": self.state, "remaining_s": max(0, round(self.c.limit_s - self._elapsed()))}
         if self.round_id and self.round_mode == "sniper":
             body.update(lives=self.lives, hits=self.hits, dodges=self.dodges)
+        if self.state == "COUNTDOWN":
+            # หน้าเว็บใช้ starts_in_s คำนวณเวลาไฟเขียว: intro_s แรกเป็น animation แล้วนับ count_s ถอยหลัง
+            body.update(starts_in_s=round(max(0.0, self.phase_end - now), 1), intro_s=self.c.intro_s,
+                        count_s=self.c.count_s)
+        if self.state == "CALIBRATE_FAILED":
+            body["failed"] = ",".join(self.failed)
         body.update(extra)
         self.publish(STATE, body, qos=1, retain=True)
-        self.next_state_at = self.clock() + 1.0
+        self.next_state_at = now + 1.0
 
-    def _send_calibration(self, now, progress):
-        seen = self.player_seen_at is not None and now - self.player_seen_at <= 2.0
-        done = round(progress * self.c.calib_s, 1)
-        self.publish(CALIBRATION, {"round_id": self.round_id, "progress": round(progress, 2),
-                                   "player_detected": int(seen), "camera_baseline_s": done,
-                                   "imu_baseline_s": done, "baseline_s": self.c.calib_s})
+    def _send_calibration(self, progress, done, checks=None):
+        now = self.clock()
+        checks = checks or self.sensor_checks(done=False)
+        seen = self.player_seen_at is not None and now - self.player_seen_at <= self.c.camera_fresh_s
+        elapsed = round(progress * self.c.calib_s, 1)
+        body = {"round_id": self.round_id, "progress": round(progress, 2), "player_detected": int(seen),
+                "camera_baseline_s": elapsed, "imu_baseline_s": elapsed, "baseline_s": self.c.calib_s,
+                "done": int(done), "required": ",".join(self.c.sensors)}
+        body.update({f"check_{name}": status for name, status in checks.items()})
+        if done:
+            failed = [name for name in SENSORS if checks[name] == "fail"]
+            body.update(ok=int(not failed), failed=",".join(failed))
+        self.publish(CALIBRATION, body)
 
     def _end(self, result, reason):
         now = self.clock()

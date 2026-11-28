@@ -8,8 +8,11 @@ panels = []
 
 
 def source(measurement, field):
+    """field เป็นชื่อเดียว หรือ tuple ของชื่อที่ความหมายเดียวกัน (อุปกรณ์แต่ละรุ่นส่งคนละชื่อ)"""
+    names = (field,) if isinstance(field, str) else field
+    match = " or ".join(f'r._field == "{name}"' for name in names)
     return (f'from(bucket: "rlgl")\n  {RANGE}\n'
-            f'  |> filter(fn: (r) => r._measurement == "{measurement}" and r._field == "{field}")')
+            f'  |> filter(fn: (r) => r._measurement == "{measurement}" and ({match}))')
 
 
 def add(kind, title, query, x, y, w, h, **extra):
@@ -51,13 +54,16 @@ def stat(title, measurement, field, x, y, w=4, unit=None, mappings=None, thresho
         fieldConfig={"defaults": defaults, "overrides": []}, options=options)
 
 
-def series(title, measurement, field, x, y, w=12, fn="mean", unit=None, limit=None, name=None):
+def series(title, measurement, field, x, y, w=12, fn="mean", unit=None, limit=None, name=None, empty=None):
     query = (source(measurement, field) +
+             '\n  |> group()'  # หลายชื่อ field รวมเป็นเส้นเดียว
              f'\n  |> aggregateWindow(every: v.windowPeriod, fn: {fn}, createEmpty: false)'
              '\n  |> keep(columns: ["_time", "_value"])')
     defaults = {"displayName": name or field, "custom": {"lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "insertNulls": 5000, "spanNulls": False}}
     if unit:
         defaults["unit"] = unit
+    if empty:
+        defaults["noValue"] = empty  # ข้อความแทน "No data"
     if limit is not None:
         defaults["thresholds"] = steps((None, "green"), (limit, "red"))
         defaults["custom"]["thresholdsStyle"] = {"mode": "line"}
@@ -106,8 +112,11 @@ series("ระยะผู้เล่น", "distance", "distance_cm", 12, 5, na
 # เส้นเกณฑ์เป็นค่าตัวอย่าง ต้องปรับตามผล calibrate
 series("ข้อมือ: acc_peak (เส้นเกณฑ์ตัวอย่าง 0.3 g)", "imu", "acc_peak", 0, 12, fn="max", limit=0.3, name="acc_peak (g)")
 series("ข้อมือ: gyro_rms", "imu", "gyro_rms", 12, 12, fn="max", name="gyro_rms (deg/s)")
-series("กล้อง: motion_score (เส้นเกณฑ์ตัวอย่าง 0.05)", "vision", "motion_score", 0, 19, fn="max", limit=0.05,
-       name="motion_score")
+# การขยับเทียบเกณฑ์ที่ Pi ปรับเองตอน calibrate (1.0 = ถึงเกณฑ์) ส่งเฉพาะช่วงไฟแดง
+# pi_client.py ใน repo ส่งชื่อ score ส่วน contract ใช้ score_ratio จึงรับทั้งสองชื่อ
+series("กล้อง: การขยับเทียบเกณฑ์ตอนไฟแดง (เส้นแดง 1.0 = เกณฑ์ของ Pi)", "vision", ("score", "score_ratio"), 0, 19,
+       fn="max", limit=1.0, name="score (× เกณฑ์)",
+       empty="ยังไม่มีไฟแดงในช่วงเวลานี้ (Pi ส่งค่านี้เฉพาะตอนไฟแดง)")
 series("กล้อง: FPS", "vision", "fps", 12, 19, name="fps")
 
 row("ประวัติ (ตารางย้อนหลัง 7 วัน)", 26)

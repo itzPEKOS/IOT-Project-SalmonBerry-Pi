@@ -51,7 +51,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"game_state\" and r._field == \"state\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"game_state\" and (r._field == \"state\"))\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -137,7 +137,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"game_state\" and r._field == \"remaining_s\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"game_state\" and (r._field == \"remaining_s\"))\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -189,7 +189,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and r._field == \"bpm\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and (r._field == \"bpm\"))\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -248,7 +248,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"distance\" and r._field == \"distance_cm\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"distance\" and (r._field == \"distance_cm\"))\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -300,7 +300,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and r._field == \"fps\")\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and (r._field == \"fps\"))\n  |> group()\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> keep(columns: [\"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -351,7 +351,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and r._field == \"bpm\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"heartrate\" and (r._field == \"bpm\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -389,7 +389,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"distance\" and r._field == \"distance_cm\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"distance\" and (r._field == \"distance_cm\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -427,7 +427,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"imu\" and r._field == \"acc_peak\")\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"imu\" and (r._field == \"acc_peak\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -481,7 +481,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"imu\" and r._field == \"gyro_rms\")\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"imu\" and (r._field == \"gyro_rms\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -501,7 +501,7 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "กล้อง: motion_score (เส้นเกณฑ์ตัวอย่าง 0.05)",
+      "title": "กล้อง: การขยับเทียบเกณฑ์ตอนไฟแดง (เส้นแดง 1.0 = เกณฑ์ของ Pi)",
       "datasource": {
         "type": "influxdb",
         "uid": "rlgl-influx"
@@ -519,12 +519,12 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and r._field == \"motion_score\")\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and (r._field == \"score\" or r._field == \"score_ratio\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "displayName": "motion_score",
+          "displayName": "score (× เกณฑ์)",
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 8,
@@ -535,6 +535,7 @@
               "mode": "line"
             }
           },
+          "noValue": "ยังไม่มีไฟแดงในช่วงเวลานี้ (Pi ส่งค่านี้เฉพาะตอนไฟแดง)",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -544,7 +545,7 @@
               },
               {
                 "color": "red",
-                "value": 0.05
+                "value": 1.0
               }
             ]
           }
@@ -573,7 +574,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and r._field == \"fps\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"vision\" and (r._field == \"fps\"))\n  |> group()\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\"])"
         }
       ],
       "fieldConfig": {
@@ -775,7 +776,7 @@
             "type": "influxdb",
             "uid": "rlgl-influx"
           },
-          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_status\" and r._field == \"status\")\n  |> group(columns: [\"device_id\"])\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> group()\n  |> keep(columns: [\"device_id\", \"_value\", \"_time\"])\n  |> rename(columns: {_value: \"status\"})"
+          "query": "from(bucket: \"rlgl\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_status\" and (r._field == \"status\"))\n  |> group(columns: [\"device_id\"])\n  |> sort(columns: [\"_time\"])\n  |> last()\n  |> group()\n  |> keep(columns: [\"device_id\", \"_value\", \"_time\"])\n  |> rename(columns: {_value: \"status\"})"
         }
       ],
       "fieldConfig": {

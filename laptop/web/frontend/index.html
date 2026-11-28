@@ -84,18 +84,19 @@
             <span class="badge warn" id="cal-badge">WAITING FOR THE PI</span>
             <div class="hold" id="cal-hold" hidden><div class="label yellow">HOLD STILL</div><div class="n" id="cal-left">-</div><div class="small muted">seconds left</div></div>
           </div>
-          <div class="actions"><span class="label cyan">CALIBRATING</span><div class="segbar cyan" id="cal-bar" style="flex:1"></div><span class="label cyan" id="cal-pct">--%</span></div>
+          <div class="actions"><span class="label cyan" id="cal-bar-label">CALIBRATING</span><div class="segbar cyan" id="cal-bar" style="flex:1"></div><span class="label cyan" id="cal-pct">--%</span></div>
         </div>
         <div class="panel">
-          <h3 class="title-m" style="margin-bottom:18px">CALIBRATION CHECKS</h3>
+          <h3 class="title-m" style="margin-bottom:18px">SENSOR CHECKS</h3>
           <div class="checks" id="checks"></div>
-          <p class="small muted" style="margin-top:18px">Operator: press START on the joystick when all checks are green</p>
+          <div class="cal-status" id="cal-status"></div>
         </div>
       </div>
     </section>
 
     <!-- 3) ไฟเขียว / แดง -->
     <section id="v-play" class="view" hidden>
+      <div class="cd-overlay" hidden></div>
       <div class="play-top">
         <div class="banner green" id="play-banner">
           <div class="light on-g" id="play-light"><i class="r"></i><i class="y"></i><i class="g"></i></div>
@@ -105,7 +106,7 @@
           <div class="label">TIME LEFT</div>
           <div class="big-time" id="play-time">--:--</div>
           <div class="segbar" id="play-timebar"></div>
-          <p class="small muted" style="margin:12px 0 0">Round limit 60 s</p>
+          <p class="small muted" style="margin:12px 0 0" id="play-limit">Round limit 30 s</p>
         </div>
       </div>
       <div class="panel">
@@ -119,6 +120,7 @@
 
     <!-- 4) sniper -->
     <section id="v-sniper" class="view" hidden>
+      <div class="cd-overlay" hidden></div>
       <div class="sniper-grid">
         <div class="panel cam-panel">
           <div class="panel-head"><span class="label">OPERATOR SCOPE · PI 5 CAMERA</span><span class="label red">AIM WITH JOYSTICK</span></div>
@@ -138,7 +140,7 @@
             <div class="lives" id="sn-lives"></div>
           </div>
           <div class="two">
-            <div class="panel"><div class="label">TIME LEFT</div><div class="stat-big yellow" id="sn-time">--:--</div><div class="small muted">limit 60 s</div></div>
+            <div class="panel"><div class="label">TIME LEFT</div><div class="stat-big yellow" id="sn-time">--:--</div><div class="small muted" id="sn-limit">limit 30 s</div></div>
             <div class="panel"><div class="label">DODGES</div><div class="stat-big cyan" id="sn-dodges">-</div><div class="small muted">from wrist IMU</div></div>
           </div>
           <div class="panel heart-row" data-heart data-compact></div>

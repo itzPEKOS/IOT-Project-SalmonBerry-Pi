@@ -43,6 +43,18 @@ class RoundNumbers:
     red_acc_recent: list = field(default_factory=list)  # (เวลาที่มาถึง, ค่า) ที่ยังตัดสินไม่ได้ว่าอยู่รอยต่อไหม
 
 
+def motion_ratio(payload):
+    """การขยับเทียบเกณฑ์ (1.0 = ถึงเกณฑ์): contract ใช้ score_ratio, pi_client.py ส่งชื่อ score"""
+    value = payload.get("score_ratio")
+    return value if is_number(value) else payload.get("score")
+
+
+def motion_raw(payload):
+    """ระยะเลื่อนหารความยาวลำตัว: contract ใช้ motion_score, pi_client.py ส่งชื่อ raw"""
+    value = payload.get("motion_score")
+    return value if is_number(value) else payload.get("raw")
+
+
 def _highest(current, value):
     if not is_number(value):
         return current
@@ -73,8 +85,8 @@ class GameTracker:
         elif topic == STATE:
             self._on_state(payload)
         elif topic == VISION and self.state == "RED_LIGHT":
-            self.numbers.red_motion_max = _highest(self.numbers.red_motion_max, payload.get("motion_score"))
-            self.numbers.closest_call = _highest(self.numbers.closest_call, payload.get("score_ratio"))
+            self.numbers.red_motion_max = _highest(self.numbers.red_motion_max, motion_raw(payload))
+            self.numbers.closest_call = _highest(self.numbers.closest_call, motion_ratio(payload))
         elif topic == DISTANCE and self.state in PLAYING:
             if is_number(payload.get("distance_cm")):
                 self.numbers.distance_cm = payload["distance_cm"]

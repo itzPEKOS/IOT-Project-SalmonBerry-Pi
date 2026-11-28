@@ -60,16 +60,17 @@ export function bpmChart(canvas, points, nowMs, windowMs = 60_000) {
   steps(ctx, recent, (p) => w - ((nowMs - p.ms) / windowMs) * w, y, C.pink);
 }
 
-/** timeline หลังจบรอบ: แถบไฟ, ระยะ, ชีพจร, คะแนนการขยับตอนไฟแดง (หรือจุดที่โดนยิงในโหมด sniper) */
-export function timelineChart(canvas, timeline, trackCm) {
+/** timeline หลังจบรอบ: แถบไฟ, ระยะ, ชีพจร, gyro ข้อมือ (ทั้งรอบ), การขยับจากกล้องตอนไฟแดง (หรือจุดที่โดนยิงในโหมด sniper)
+ * gyroLimit = เกณฑ์ gyro ของ game engine (deg/s) */
+export function timelineChart(canvas, timeline, trackCm, gyroLimit = 50) {
   const { ctx, w, h } = prepare(canvas);
   const left = 78, right = 12, top = 4, bottom = 22;
   const end = Math.max(timeline.end ?? 0, ...timeline.segments.map((s) => s.to ?? s.from), 1);
   const x = (t) => left + (t / end) * (w - left - right);
   const sniper = timeline.mode === "sniper";
   const rows = sniper
-    ? [["LIGHT", 26], ["METERS", 0.42], ["HEART", 0.58]]
-    : [["LIGHT", 26], ["METERS", 0.28], ["HEART", 0.42], ["MOTION", 0.3]];
+    ? [["LIGHT", 26], ["METERS", 0.3], ["HEART", 0.4], ["WRIST", 0.3]]
+    : [["LIGHT", 26], ["METERS", 0.2], ["HEART", 0.3], ["WRIST", 0.25], ["CAMERA", 0.25]];
   const fixed = rows.filter((r) => r[1] > 1).reduce((a, r) => a + r[1], 0);
   const free = h - top - bottom - fixed - 8 * (rows.length - 1);
   let cursor = top;
@@ -120,9 +121,24 @@ export function timelineChart(canvas, timeline, trackCm) {
   }
   steps(ctx, timeline.bpm, (p) => x(p.t), yb, C.pink);
 
-  // คะแนนการขยับเทียบเกณฑ์ (1.0 = แพ้)
+  // gyro ข้อมือตลอดรอบ (เส้นประ = เกณฑ์ที่ engine ใช้ตอนไฟแดง)
+  const wr = box.WRIST;
+  const gyro = timeline.gyro ?? [];
+  const gScale = Math.max(gyroLimit * 2, ...gyro.map((p) => p.v));
+  const yg = (v) => wr.y + wr.h - 3 - (Math.min(v, gScale) / gScale) * (wr.h - 6);
+  steps(ctx, gyro, (p) => x(p.t), (p) => yg(p.v), C.violet, 2);
+  ctx.strokeStyle = C.yellow;
+  ctx.setLineDash([5, 4]);
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(left, yg(gyroLimit)); ctx.lineTo(w - right, yg(gyroLimit)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = C.muted;
+  ctx.fillText(`${gyroLimit}°/s`, left + 4, yg(gyroLimit) - 7);
+  if (!gyro.length) ctx.fillText("NO WRIST DATA", left + 4, wr.y + wr.h / 2);
+
+  // การขยับจากกล้อง (MediaPipe บน Pi) เทียบเกณฑ์ เฉพาะตอนไฟแดง (1.0 = แพ้)
   if (!sniper) {
-    const mo = box.MOTION;
+    const mo = box.CAMERA;
     const scale = Math.max(1.5, ...timeline.motion.map((p) => p.v));
     const ym = (v) => mo.y + mo.h - (v / scale) * (mo.h - 4);
     for (const p of timeline.motion) {

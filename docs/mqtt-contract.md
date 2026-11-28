@@ -42,7 +42,7 @@ backend ตั้ง LWT ให้ `backend-01` เท่านั้น game en
 
 | Topic | field | ความหมาย |
 |---|---|---|
-| `rlgl/gateway/vision` | `score_ratio` | คะแนนการขยับหารด้วยเกณฑ์ (1.0 = ถึงเกณฑ์) ใช้ทำ `closest_call` |
+| `rlgl/gateway/vision` | `score_ratio` | คะแนนการขยับหารด้วยเกณฑ์ (1.0 = ถึงเกณฑ์) ใช้ทำ `closest_call` และกราฟกล้องใน Grafana `pi_client.py` ส่งชื่อ `score` (และ `raw` แทน `motion_score`) backend, หน้าเว็บ และ Grafana รับได้ทั้งสองชื่อ |
 | `rlgl/game/result` | `caught_part` | ส่วนร่างกายที่ขยับ: `head`, `left_arm`, `right_arm`, `torso`, `left_leg`, `right_leg` |
 | `rlgl/game/result` | `caught_red_s` | โดนจับหลังเริ่มไฟแดงกี่วินาที |
 | `rlgl/game/result` | `caught_score_ratio` | คะแนนสูงสุดตอนโดนจับ เทียบเกณฑ์ |

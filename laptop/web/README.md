@@ -247,6 +247,7 @@ topic อื่นใน [`docs/mqtt-contract.md`](../../docs/mqtt-contract.md) 
 - ชื่อใช้ได้ 1-10 ตัว: `A-Z 0-9 _ -` เก็บเป็นตัวพิมพ์ใหญ่ ชื่อภาษาไทยใช้ไม่ได้
 - หนึ่งรอบมี `number` (เลข `#07`), `round_id`, `mode` (`rlgl` / `sniper`), `hits`, `dodges` (เฉพาะ sniper), `player`, `started_at`, `ended_at` (epoch ms ตามนาฬิกา laptop), `duration_s`, `result`, `reason`, `finish_state`, `distance_cm`, `bpm_avg`, `bpm_max`, `bpm_rest`, `red_light_count`, `red_motion_max`, `red_acc_peak_max`, `closest_call`, `caught_part`, `caught_red_s`, `caught_score_ratio`, `video_url` ค่าที่ไม่มีข้อมูลเป็น `null`
 - `bpm_rest`, `closest_call`, `caught_*` จะเป็น `null` จนกว่า Pi จะส่ง field ที่เสนอไว้ใน[ข้อตกลง MQTT](../../docs/mqtt-contract.md) (ตัวจำลองยังไม่ส่ง)
+- `closest_call` ใช้ `score_ratio` หรือ `score` (ชื่อที่ `pi_client.py` ส่ง) และ `red_motion_max` ใช้ `motion_score` หรือ `raw`
 - `standing` มีเฉพาะรอบที่ชนะและมีชื่อ: `rank`, `personal_best`, `new_record`, `beaten` (`{"player","by_s"}` หรือ `null`) **คิดจากสถานการณ์ตอนจบรอบนั้น** ส่วน `rank` ใน `/api/players` และ `/api/leaderboard` คืออันดับปัจจุบัน
 - อันดับใช้เวลาดีที่สุดคนละหนึ่งแถว เวลาเท่ากันคนที่ทำได้ก่อนอยู่บน รอบที่ไม่มีชื่อไม่นับ
 - ประวัติแสดงเฉพาะ `WIN` และ `GAME_OVER` รอบที่ถูกยกเลิก (`ABORTED`) ใช้เลขรอบไปแล้ว เลขในตารางประวัติจึงอาจข้าม

@@ -2,14 +2,18 @@
 // เปิดเป็นจอผู้เล่น: http://<laptop>:8000/          (role=display ส่ง ping ให้ game engine รู้ว่าจอยังอยู่)
 // เปิดเป็นจอคนดู:   http://<laptop>:8000/?role=viewer
 import {
-  PLAYING, Recorder, bpmFresh, causeText, clock, countdown, partName, progress, roundLabel, screenFor, whatHappened,
+  PLAYING, ROUND_LIMIT_S, Recorder, bpmFresh, causeText, clock, countdown, countdownPhase, partName, progress,
+  roundLabel, roundLimit, screenFor, whatHappened,
 } from "./logic.js";
 import { fillSprites, sprite } from "./sprites.js";
 import { bpmChart, timelineChart } from "./charts.js";
 
 const params = new URLSearchParams(location.search);
 const ROLE = params.get("role") === "viewer" ? "viewer" : "display";
-const ROUND_LIMIT_S = 60;
+const GYRO_LIMIT_DPS = 50; // เกณฑ์ gyro ของ game engine ตอนไฟแดง (ค่าเริ่มต้น --imu-gyro)
+const GO_FLASH_MS = 900;   // โชว์ "GO!" ค้างหลังไฟเขียวแรก
+// ช่วงที่ถือว่ากำลังเล่น: ล็อกจอผู้เล่นไว้ที่หน้าเกม
+const BUSY = ["CALIBRATE", "CALIBRATE_FAILED", "READY", "COUNTDOWN", ...PLAYING];
 const AIM_STALE_MS = 1500;
 const HIT_FLASH_MS = 1800;
 const DEVICES = [["wrist-01", "ESP32 #1"], ["station-01", "ESP32 #2"], ["gateway-01", "PI 5"], ["broker", "BROKER"]];
@@ -137,6 +141,12 @@ function onMessage(topic, payload, now) {
   }
   if (topic === T.state && num(payload.hits) && num(before?.hits) && payload.hits > before.hits) app.lastHitAt = now;
   if (topic === T.state && payload.state === "CALIBRATE" && before?.state !== "CALIBRATE") loadRound(payload.round_id);
+  if (topic === T.state) {
+    if (before?.round_id !== payload.round_id) app.limit = null;
+    app.stateAt = now;
+    if (payload.state !== "IDLE") app.limit = roundLimit(app.limit, payload.remaining_s);
+    if (before?.state === "COUNTDOWN" && (payload.state === "GREEN_LIGHT" || payload.state === "SNIPER")) app.goAt = now;
+  }
   if (topic === T.heart && num(payload.bpm)) {
     app.bpmAt = now;
     app.bpmPoints.push({ ms: now, v: payload.bpm });
@@ -162,7 +172,7 @@ function schedule() {
 
 function render() {
   const state = app.latest[T.state];
-  const playing = state && (PLAYING.includes(state.state) || state.state === "CALIBRATE");
+  const playing = state && BUSY.includes(state.state);
   // จอผู้เล่นห้ามค้างอยู่ที่ scoreboard ระหว่างเล่น
   if (ROLE === "display" && playing && app.tab !== "live") setTab("live");
   $("#tab-board").disabled = ROLE === "display" && playing;
@@ -221,6 +231,7 @@ function renderLive() {
   const state = app.latest[T.state];
   const screen = screenFor({
     connected: app.connected, state: state?.state, roundId: state?.round_id, dismissedRound: app.dismissed,
+    mode: state?.mode,
   });
   const shown = screen === "offline" ? app.screen ?? "setup" : screen;
   if (shown !== app.screen) {
@@ -300,7 +311,7 @@ const HOW = {
     ["heart", "Clip the heart sensor on your finger and wear the wristband"],
     ["camera", "The operator aims the camera with the joystick"],
     ["runner", "Keep your body out of the hit box: 1 s inside = HIT (3 lives)"],
-    ["flag", "Reach and touch the button within 60 s to win"],
+    ["flag", `Reach and touch the button within ${ROUND_LIMIT_S} s to win`],
   ],
 };
 
@@ -366,52 +377,92 @@ async function chooseMode(mode) {
   schedule();
 }
 
-// ---- 2) calibrate
+// ---- 2) calibrate (เช็ก sensor) → READY หรือ CALIBRATE_FAILED
+const SENSOR_ROWS = [
+  ["imu", "Wrist motion (MPU6050)", "ESP32 #1 · gyro + accelerometer"],
+  ["heart", "Heart rate (KY-039)", "ESP32 #1 · finger sensor"],
+  ["camera", "Camera (MediaPipe)", "Pi 5 · sees your whole body"],
+  ["distance", "Distance (ultrasonic)", "Pi 5 · HC-SR04"],
+  ["station", "Joystick + servo", "ESP32 #2 · camera station"],
+];
+const CHECK_CLASS = { ok: "ok", wait: "wait", fail: "bad", off: "off" };
+
 function renderCalibrate() {
-  $("#v-calibrate [data-stepper]").innerHTML = stepper(2);
+  const state = app.latest[T.state];
+  const ready = state.state === "READY";
+  const failed = state.state === "CALIBRATE_FAILED";
+  $("#v-calibrate [data-stepper]").innerHTML = stepper(ready ? 3 : 2);
   const roundId = currentRoundId();
   const cal = app.latest[T.calibration]?.round_id === roundId ? app.latest[T.calibration] : null;
-  const vision = app.latest[T.vision];
-  const distance = app.latest[T.distance]?.distance_cm;
-  const track = app.config.track_cm;
   const now = Date.now();
 
   const badge = $("#cal-badge");
-  if (cal?.player_detected) {
-    badge.textContent = `PLAYER DETECTED${num(cal.keypoints) ? ` · ${cal.keypoints}/17 POINTS` : ""}`;
-    badge.className = "badge";
-  } else if (cal) {
-    badge.textContent = "NO PLAYER IN VIEW"; badge.className = "badge bad";
-  } else {
-    badge.textContent = "WAITING FOR THE PI"; badge.className = "badge warn";
-  }
-  const pct = num(cal?.progress) ? Math.round(cal.progress * 100) : null;
+  if (cal?.player_detected) { badge.textContent = "PLAYER DETECTED"; badge.className = "badge"; }
+  else if (cal) { badge.textContent = "NO PLAYER IN VIEW"; badge.className = "badge bad"; }
+  else { badge.textContent = "WAITING FOR THE PI"; badge.className = "badge warn"; }
+
+  const pct = ready || failed ? 100 : num(cal?.progress) ? Math.round(cal.progress * 100) : null;
   segbar($("#cal-bar"), 25, pct === null ? 0 : Math.round((pct / 100) * 25));
   $("#cal-pct").textContent = pct === null ? "--%" : `${pct}%`;
+  $("#cal-bar-label").textContent = ready ? "CALIBRATED" : failed ? "CHECK FAILED" : "CALIBRATING";
   const hold = $("#cal-hold");
-  hold.hidden = !(num(cal?.progress) && num(cal?.baseline_s));
+  hold.hidden = ready || failed || !(num(cal?.progress) && num(cal?.baseline_s));
   if (!hold.hidden) $("#cal-left").textContent = String(Math.max(0, Math.ceil((1 - cal.progress) * cal.baseline_s)));
 
-  const onLine = num(distance) ? Math.abs(distance - track) <= 30 : null;
-  const baseline = (value) => (num(value) && num(cal?.baseline_s) ? value >= cal.baseline_s : null);
-  const bpmOk = bpmFresh(app.bpmAt, now);
-  const checks = [
-    { title: "Player detected", text: "Pose model sees all 17 keypoints",
-      status: cal ? (cal.player_detected ? "ok" : "bad") : num(vision?.confidence) ? (vision.confidence > 0.5 ? "ok" : "bad") : "wait",
-      value: cal ? (cal.player_detected ? "OK" : "NO") : "--" },
-    { title: "On the start line", text: num(distance) ? `Ultrasonic: ${(distance / 100).toFixed(2)} m from the sensor (start ${(track / 100).toFixed(1)} m)` : "Ultrasonic: no reading yet",
-      status: onLine === null ? "wait" : onLine ? "ok" : "bad", value: onLine === null ? "--" : onLine ? "OK" : "MOVE" },
-    { title: "Camera noise baseline", text: "Learning how much each point jitters when you are still",
-      status: baseline(cal?.camera_baseline_s) === null ? "wait" : baseline(cal.camera_baseline_s) ? "ok" : "wait",
-      value: cal && num(cal.camera_baseline_s) ? `${Math.floor(cal.camera_baseline_s)}/${cal.baseline_s} s` : "--" },
-    { title: "Wrist baseline (IMU)", text: "Measuring gyro offset and noise",
-      status: baseline(cal?.imu_baseline_s) === null ? "wait" : baseline(cal.imu_baseline_s) ? "ok" : "wait",
-      value: cal && num(cal.imu_baseline_s) ? `${Math.floor(cal.imu_baseline_s)}/${cal.baseline_s} s` : "--" },
-    { title: "Resting heart rate", text: "BPM from the finger sensor",
-      status: bpmOk ? "info" : "wait", value: bpmOk ? String(app.latest[T.heart].bpm) : "--" },
-  ];
-  $("#checks").innerHTML = checks.map((c) => `<div class="check ${c.status}"><i></i>
-    <div><b>${esc(c.title)}</b><span class="small">${esc(c.text)}</span></div><span class="val">${esc(c.value)}</span></div>`).join("");
+  // ผลเช็กของแต่ละ sensor มาจาก game engine (check_<ชื่อ> = ok / wait / fail / off)
+  const bpm = bpmFresh(app.bpmAt, now) ? app.latest[T.heart]?.bpm : null;
+  const distance = app.latest[T.distance]?.distance_cm;
+  const value = {
+    imu: { ok: "OK", wait: "...", fail: "NO DATA", off: "--" },
+    heart: { ok: num(bpm) ? `${bpm} BPM` : "OK", wait: "...", fail: "NO PULSE", off: "--" },
+    camera: { ok: "OK", wait: "...", fail: "NOT SEEN", off: "--" },
+    distance: { ok: num(distance) ? `${(distance / 100).toFixed(2)} m` : "OK", wait: "...", fail: "NO DATA", off: "NOT USED" },
+    station: { ok: "ONLINE", wait: "...", fail: "OFFLINE", off: "NOT USED" },
+  };
+  $("#checks").innerHTML = SENSOR_ROWS.map(([key, title, text]) => {
+    const status = cal?.[`check_${key}`] ?? "wait";
+    return `<div class="check ${CHECK_CLASS[status] ?? "wait"}"><i></i>
+      <div><b>${esc(title)}</b><span class="small">${esc(text)}</span></div><span class="val">${esc(value[key][status] ?? "--")}</span></div>`;
+  }).join("");
+
+  const box = $("#cal-status");
+  const names = Object.fromEntries(SENSOR_ROWS.map(([key, title]) => [key, title.split(" (")[0]]));
+  if (ready) {
+    box.className = "cal-status ok";
+    box.innerHTML = "<b>ALL SENSORS OK</b><span>Operator: press START again to begin</span>";
+  } else if (failed) {
+    const list = String(state.failed || cal?.failed || "").split(",").filter(Boolean).map((k) => names[k] ?? k).join(", ");
+    box.className = "cal-status bad";
+    box.innerHTML = `<b>CHECK FAILED</b><span>${esc(list || "a sensor")} · fix it, then press START to calibrate again</span>`;
+  } else {
+    box.className = "cal-status";
+    box.innerHTML = "<b>CHECKING SENSORS…</b><span>Stand still with your whole body in view</span>";
+  }
+}
+
+// นับถอยหลังทับหน้าเกม: animation → 3, 2, 1 → GO!
+function renderCountdown(section) {
+  const state = app.latest[T.state];
+  const overlay = $(".cd-overlay", section);
+  const now = Date.now();
+  let phase = null;
+  if (state.state === "COUNTDOWN") phase = countdownPhase(state, app.stateAt ?? now, now);
+  else if (app.goAt && now - app.goAt < GO_FLASH_MS) phase = { phase: "go" };
+  overlay.hidden = !phase;
+  if (!phase) return;
+  const key = phase.phase === "count" ? `count-${phase.number}` : phase.phase;
+  if (overlay.dataset.key !== key) {
+    overlay.dataset.key = key;
+    if (phase.phase === "intro") {
+      overlay.innerHTML = `<div class="cd-intro"><div class="cd-runner">${sprite("runner", 8)}</div>
+        <div class="cd-title">GET READY!</div><div class="cd-sub">${state.mode === "sniper" ? "Dodge the crosshair · reach the button" : "Walk on GREEN · freeze on RED"}</div></div>`;
+    } else if (phase.phase === "count") {
+      overlay.innerHTML = `<div class="cd-num">${phase.number}</div>`;
+    } else {
+      overlay.innerHTML = '<div class="cd-num go">GO!</div>';
+    }
+  }
+  schedule(); // วาดต่อจนนับครบ
 }
 
 // ---- 3) ไฟเขียว/แดง
@@ -419,6 +470,7 @@ const BANNERS = {
   GREEN_LIGHT: ["green", "on-g", "GREEN LIGHT", "Walk to the finish"],
   TRANSITION: ["yellow", "on-y", "TURNING…", "Get ready to freeze"],
   RED_LIGHT: ["red", "on-r", "RED LIGHT", "Freeze! The camera is watching"],
+  COUNTDOWN: ["grey", "", "GET READY", "The round starts in a moment"],
 };
 
 let trackBuilt = false;
@@ -445,7 +497,9 @@ function renderPlay() {
   $("#play-title").textContent = title;
   $("#play-sub").textContent = sub;
   $("#play-time").textContent = countdown(state.remaining_s);
-  segbar($("#play-timebar"), 20, num(state.remaining_s) ? Math.ceil((state.remaining_s / ROUND_LIMIT_S) * 20) : 0);
+  const limit = app.limit ?? ROUND_LIMIT_S;
+  segbar($("#play-timebar"), 20, num(state.remaining_s) ? Math.ceil((state.remaining_s / limit) * 20) : 0);
+  $("#play-limit").textContent = `Round limit ${Math.round(limit)} s`;
 
   if (!trackBuilt) buildTrack();
   const where = progress(app.latest[T.distance]?.distance_cm, app.config.track_cm);
@@ -460,6 +514,7 @@ function renderPlay() {
   if (runnerArt.dataset.art !== art) { runnerArt.dataset.art = art; runnerArt.innerHTML = sprite(art, 6); }
   $("#frozen").hidden = state.state !== "RED_LIGHT";
   renderHearts($("#v-play"));
+  renderCountdown($("#v-play"));
 }
 
 function renderHearts(section) {
@@ -536,7 +591,9 @@ function renderSniper() {
   const where = progress(app.latest[T.distance]?.distance_cm, app.config.track_cm);
   $("#sn-dist").textContent = where ? `${where.covered_m.toFixed(1)} m / ${where.total_m.toFixed(1)} m` : "-- m";
   segbar($("#sn-distbar"), 25, where ? Math.round(where.ratio * 25) : 0, (i, on) => (i === on - 1 ? "head" : ""));
+  $("#sn-limit").textContent = `limit ${Math.round(app.limit ?? ROUND_LIMIT_S)} s`;
   renderHearts($("#v-sniper"));
+  renderCountdown($("#v-sniper"));
 }
 
 // ---- 5) ผลรอบ
@@ -601,13 +658,14 @@ function renderResult() {
   $("#tl-legend").hidden = !has;
   $("#tl-empty").hidden = has;
   $("#tl-title").textContent = has && timeline.end !== null ? `ROUND TIMELINE · ${timeline.end.toFixed(1)} s` : "ROUND TIMELINE";
-  const key = JSON.stringify([roundId, timeline.end, timeline.segments.length, timeline.bpm.length, $("#tl-canvas").clientWidth, !!timeline.result]);
+  const key = JSON.stringify([roundId, timeline.end, timeline.segments.length, timeline.bpm.length, timeline.gyro.length, $("#tl-canvas").clientWidth, !!timeline.result]);
   if (has && key !== lastTimelineKey) {
     lastTimelineKey = key;
-    timelineChart($("#tl-canvas"), timeline, app.config.track_cm);
+    timelineChart($("#tl-canvas"), timeline, app.config.track_cm, GYRO_LIMIT_DPS);
     $("#tl-legend").innerHTML = [
-      ["#47d1ff", "distance (ultrasonic)"], ["#ff5c8a", "heart rate"],
-      ...(mode === "sniper" ? [["#8b6cff", "sniper round"], ["#ff3b4e", "hit"]] : [["#3be36b", "still"], ["#ffc93c", "close call"], ["#ff3b4e", "moved (≥ 1.0)"]]),
+      ["#47d1ff", "distance (ultrasonic)"], ["#ff5c8a", "heart rate"], ["#8b6cff", "wrist gyro (whole round)"],
+      ...(mode === "sniper" ? [["#ff3b4e", "hit"]]
+        : [["#3be36b", "camera: still (RED only)"], ["#ffc93c", "close call"], ["#ff3b4e", "moved (≥ 1.0)"]]),
     ].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join("");
   }
   const rows = has ? whatHappened(timeline, app.config.track_cm) : [];

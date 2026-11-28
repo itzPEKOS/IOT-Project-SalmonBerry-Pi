@@ -3,9 +3,10 @@
 ในโฟลเดอร์ laptop:
     python -m engine                   อ่าน IP ของ broker จาก infra/.env (RLGL_MQTT_HOST)
     python -m engine --host 172.20.10.2
-    python -m engine --skip-checks     เริ่มรอบได้แม้อุปกรณ์ยังไม่ครบ (ไว้ทดสอบ)
+    python -m engine --skip-checks     เริ่มรอบได้แม้อุปกรณ์และ sensor ยังไม่ครบ (ไว้ทดสอบ)
+    python -m engine --sensors imu,camera   ไม่บังคับชีพจร (ถ้า KY-039 วัดไม่ได้)
 
-คำสั่งในหน้าต่างนี้: Enter = เริ่มรอบ, a = ยกเลิกรอบ, t = จำลองแตะเส้นชัย, s = ดูสถานะอุปกรณ์, q = ออก
+คำสั่งในหน้าต่างนี้: Enter = calibrate (ครั้งแรก) / เริ่มเล่น (ครั้งที่สอง), a = ยกเลิกรอบ, t = จำลองแตะเส้นชัย, s = ดูสถานะอุปกรณ์, q = ออก
 """
 import argparse
 import json
@@ -18,7 +19,7 @@ import time
 
 import paho.mqtt.client as mqtt
 
-from engine.core import ACTIVE, BUTTON, CMD, RESULT, STATE, STATUS_PREFIX, SUBSCRIPTIONS, Config, Engine
+from engine.core import ACTIVE, BUTTON, CALIBRATION, CMD, RESULT, SENSORS, STATE, STATUS_PREFIX, SUBSCRIPTIONS, Config, Engine
 
 DEVICE_ID = "game-01"
 STATUS_TOPIC = STATUS_PREFIX + DEVICE_ID
@@ -45,12 +46,22 @@ def parse_args(env):
     p.add_argument("--green", type=float, nargs=2, default=(3.0, 6.0), metavar=("MIN", "MAX"))
     p.add_argument("--red", type=float, nargs=2, default=(3.0, 5.0), metavar=("MIN", "MAX"))
     p.add_argument("--transition", type=float, default=1.5, help="วินาทีที่กล้องหัน (ยังไม่จับ)")
-    p.add_argument("--limit", type=float, default=60.0, help="เวลาเล่นต่อรอบ (วินาที)")
+    p.add_argument("--limit", type=float, default=30.0, help="เวลาเล่นต่อรอบ (วินาที)")
+    p.add_argument("--intro", type=float, default=2.0, help="วินาทีของ animation ก่อนนับถอยหลัง")
+    p.add_argument("--count", type=float, default=3.0, help="นับถอยหลังกี่วินาที")
+    p.add_argument("--sensors", default="imu,heart,camera",
+                   help=f"sensor ที่ต้องใช้ได้ตอน calibrate คั่นด้วย , จาก {','.join(SENSORS)} (ใส่ none = ไม่เช็ก)")
     p.add_argument("--imu-acc", type=float, default=0.3, help="ไฟแดง: acc_peak (g) เกินนี้ = ขยับ")
     p.add_argument("--imu-gyro", type=float, default=50.0, help="ไฟแดง: gyro_rms (deg/s) เกินนี้ = ขยับ")
     p.add_argument("--skip-checks", action="store_true", help="ไม่ต้องรอ web/backend/Pi/ข้อมือ online")
     p.add_argument("--no-console", action="store_true", help="ไม่รับคำสั่งจากคีย์บอร์ด (เริ่มรอบด้วยปุ่มบนสถานีเท่านั้น)")
-    return p.parse_args()
+    args = p.parse_args()
+    names = [] if args.sensors.strip().lower() == "none" else [n.strip().lower() for n in args.sensors.split(",") if n.strip()]
+    unknown = [n for n in names if n not in SENSORS]
+    if unknown:
+        p.error(f"ไม่รู้จัก sensor: {', '.join(unknown)} (ใช้ได้: {', '.join(SENSORS)} หรือ none)")
+    args.sensors = tuple(names)
+    return args
 
 
 def say(text):
@@ -65,7 +76,9 @@ class Runner:
         self.last_state = None
         config = Config(calib_s=args.calib, green_s=tuple(args.green), red_s=tuple(args.red),
                         transition_s=args.transition, limit_s=args.limit, imu_acc_g=args.imu_acc,
-                        imu_gyro_dps=args.imu_gyro, require=() if args.skip_checks else Config.require)
+                        imu_gyro_dps=args.imu_gyro, intro_s=args.intro, count_s=args.count,
+                        sensors=() if args.skip_checks else args.sensors,
+                        require=() if args.skip_checks else Config.require)
         self.engine = Engine(config, publish=self.publish)
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"{DEVICE_ID}-{os.getpid()}")
         if env.get("MQTT_USER"):
@@ -110,6 +123,12 @@ class Runner:
             self.last_state = body["state"]
             extra = f" ({body['reason']})" if body.get("reason") else ""
             say(f"รอบ {body['round_id']}: {body['state']}{extra}")
+        elif topic == CALIBRATION and body.get("done"):
+            checks = "  ".join(f"{name}={body[f'check_{name}']}" for name in SENSORS)
+            if body.get("ok"):
+                say(f"calibrate ผ่าน: {checks}  → กด Enter อีกครั้งเพื่อเริ่มเล่น")
+            else:
+                say(f"calibrate ไม่ผ่าน (ใช้ไม่ได้: {body['failed']}): {checks}  → แก้แล้วกด Enter เพื่อ calibrate ใหม่")
         elif topic == RESULT:
             details = ", ".join(f"{k}={body[k]}" for k in ("duration_s", "caught_part", "caught_score_ratio",
                                                           "caught_red_s", "hits", "dodges", "bpm_rest") if k in body)
@@ -127,7 +146,7 @@ class Runner:
             if line in commands:
                 self.inbox.put(("command", commands[line], None))
             else:
-                print("Enter = เริ่มรอบ, a = ยกเลิก, t = แตะเส้นชัย, s = สถานะอุปกรณ์, q = ออก", flush=True)
+                print("Enter = calibrate / เริ่มเล่น, a = ยกเลิก, t = แตะเส้นชัย, s = สถานะอุปกรณ์, q = ออก", flush=True)
 
     def _run_command(self, name):
         if name == "quit":
@@ -135,7 +154,8 @@ class Runner:
         elif name == "status":
             devices = ", ".join(f"{d}={'online' if on else 'offline'}" for d, on in sorted(self.engine.devices.items()))
             missing = self.engine.missing()
-            say(f"อุปกรณ์: {devices or '(ยังไม่ได้รับสถานะ)'}  โหมดถัดไป: {self.engine.mode}")
+            say(f"อุปกรณ์: {devices or '(ยังไม่ได้รับสถานะ)'}  โหมดถัดไป: {self.engine.mode}  state: {self.engine.state}")
+            say(f"sensor ที่ต้องผ่านตอน calibrate: {', '.join(self.engine.c.sensors) or '(ไม่เช็ก)'}")
             say("พร้อมเริ่มรอบ" if not missing else "ยังขาด: " + ", ".join(missing))
         else:
             ok, detail = self.engine.command(name)
@@ -176,7 +196,7 @@ class Runner:
         self.client.loop_start()
         if console:
             threading.Thread(target=self.console, daemon=True).start()
-            print("Enter = เริ่มรอบ, a = ยกเลิก, t = แตะเส้นชัย, s = สถานะอุปกรณ์, q = ออก (หรือ Ctrl+C)", flush=True)
+            print("Enter = calibrate / เริ่มเล่น, a = ยกเลิก, t = แตะเส้นชัย, s = สถานะอุปกรณ์, q = ออก (หรือ Ctrl+C)", flush=True)
         try:
             while self.running:
                 deadline = time.monotonic() + TICK_S
@@ -206,8 +226,9 @@ class Runner:
 
 
 def main():
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     env = load_env()
     args = parse_args(env)
     Runner(args, env).run(console=not args.no_console)

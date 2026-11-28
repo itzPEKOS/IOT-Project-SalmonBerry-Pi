@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 
 import {
   clock, countdown, screenFor, causeText, partName, progress, bpmFresh, Recorder, whatHappened, roundLabel,
+  countdownPhase, roundLimit,
 } from "../../frontend/js/logic.js";
 
 test("clock shows minutes, seconds and tenths", () => {
@@ -26,6 +27,59 @@ test("round label pads the number", () => {
   assert.equal(roundLabel(7), "#07");
   assert.equal(roundLabel(124), "#124");
   assert.equal(roundLabel(null), "#--");
+});
+
+test("calibrate, a failed check and ready all show the calibrate screen", () => {
+  const base = { connected: true, roundId: "r1", dismissedRound: null };
+  for (const state of ["CALIBRATE", "CALIBRATE_FAILED", "READY"]) {
+    assert.equal(screenFor({ ...base, state }), "calibrate", state);
+  }
+});
+
+test("the countdown shows on the game screen of the chosen mode", () => {
+  const base = { connected: true, roundId: "r1", dismissedRound: null, state: "COUNTDOWN" };
+  assert.equal(screenFor({ ...base, mode: "rlgl" }), "play");
+  assert.equal(screenFor({ ...base, mode: "sniper" }), "sniper");
+  assert.equal(screenFor(base), "play");
+});
+
+test("countdown phases: intro animation, then 3-2-1, then GO", () => {
+  // ได้ state COUNTDOWN ตอน 10_000 ms: เหลือ 5 วิ = intro 2 + นับ 3
+  const msg = { state: "COUNTDOWN", starts_in_s: 5, intro_s: 2, count_s: 3 };
+  assert.deepEqual(countdownPhase(msg, 10_000, 10_000), { phase: "intro", progress: 0 });
+  assert.deepEqual(countdownPhase(msg, 10_000, 11_000), { phase: "intro", progress: 0.5 });
+  assert.deepEqual(countdownPhase(msg, 10_000, 12_100), { phase: "count", number: 3 });
+  assert.deepEqual(countdownPhase(msg, 10_000, 13_500), { phase: "count", number: 2 });
+  assert.deepEqual(countdownPhase(msg, 10_000, 14_999), { phase: "count", number: 1 });
+  assert.deepEqual(countdownPhase(msg, 10_000, 15_200), { phase: "go" });
+  // ข้อความที่ส่งซ้ำทุกวินาทีมี starts_in_s ใหม่: ผลต้องตรงกัน
+  assert.deepEqual(countdownPhase({ ...msg, starts_in_s: 2 }, 13_000, 13_500), { phase: "count", number: 2 });
+});
+
+test("the time bar uses the longest time left seen in the round", () => {
+  assert.equal(roundLimit(null, 30), 30);
+  assert.equal(roundLimit(30, 21), 30);
+  assert.equal(roundLimit(30, 60), 60); // engine ตั้งเวลาเล่นยาวกว่า 30 วิ
+  assert.equal(roundLimit(null, undefined), 30);
+});
+
+test("the recorder keeps the wrist gyro for the whole round and the camera score on red only", () => {
+  const rec = new Recorder();
+  feed(rec, [
+    [0, S, { round_id: "r1", state: "COUNTDOWN" }],
+    [500, "rlgl/wrist/imu", { gyro_rms: 99 }],  // ก่อนเริ่มเล่น: ไม่เก็บ
+    [1000, S, { round_id: "r1", state: "GREEN_LIGHT" }],
+    [1500, "rlgl/wrist/imu", { gyro_rms: 62.5, acc_peak: 0.4 }],
+    [1600, "rlgl/gateway/vision", { score: 3.0 }],  // ไฟเขียว: กล้องไม่เก็บ
+    [4000, S, { round_id: "r1", state: "RED_LIGHT" }],
+    [4500, "rlgl/wrist/imu", { gyro_rms: 3.1 }],
+    [4600, "rlgl/gateway/vision", { score: 0.4 }],
+    [5000, "rlgl/game/result", { round_id: "r1", result: "GAME_OVER", reason: "imu" }],
+    [5100, "rlgl/wrist/imu", { gyro_rms: 40 }],  // หลังจบ: ไม่เก็บ
+  ]);
+  const t = rec.timeline();
+  assert.deepEqual(t.gyro, [{ t: 0.5, v: 62.5 }, { t: 3.5, v: 3.1 }]);
+  assert.deepEqual(t.motion, [{ t: 3.6, v: 0.4 }]);
 });
 
 test("the screen follows the game state", () => {
@@ -185,6 +239,19 @@ test("what happened lists each red light and the ending", () => {
   ]);
   assert.equal(rows[1].detail, "Froze at 0.9 m");
   assert.equal(rows[2].detail, "Max motion 0.82 at 0.9 m");
+});
+
+test("the timeline also reads the Pi field name score", () => {
+  const rec = new Recorder();
+  feed(rec, [
+    [0, S, { round_id: "r1", state: "GREEN_LIGHT" }],
+    [1000, "rlgl/gateway/vision", { event: "frame", score: 4.0 }],
+    [3000, S, { round_id: "r1", state: "RED_LIGHT" }],
+    [3500, "rlgl/gateway/vision", { event: "frame", score: 0.57, raw: 0.02 }],
+    [3600, "rlgl/gateway/vision", { event: "frame", score: null }],
+    [6000, S, { round_id: "r1", state: "GREEN_LIGHT" }],
+  ]);
+  assert.deepEqual(rec.timeline().motion, [{ t: 3.5, v: 0.57 }]);
 });
 
 test("what happened marks the red light where the player was caught", () => {

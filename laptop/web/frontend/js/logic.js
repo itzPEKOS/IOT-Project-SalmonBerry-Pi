@@ -6,6 +6,8 @@ const RESULT = "rlgl/game/result";
 const HEART = "rlgl/wrist/heartrate";
 const DISTANCE = "rlgl/gateway/distance";
 const VISION = "rlgl/gateway/vision";
+const IMU = "rlgl/wrist/imu";
+export const ROUND_LIMIT_S = 30; // ค่าเริ่มต้นของ game engine
 export const BPM_STALE_MS = 10_000;
 export const CLOSE_CALL = 0.7; // คะแนนเทียบเกณฑ์ที่ถือว่าเฉียด
 
@@ -33,13 +35,30 @@ export function roundLabel(number) {
 }
 
 /** เลือกหน้าจอจาก state ล่าสุด */
-export function screenFor({ connected, state, roundId, dismissedRound }) {
+export function screenFor({ connected, state, roundId, dismissedRound, mode }) {
   if (!connected) return "offline";
-  if (state === "CALIBRATE") return "calibrate";
+  if (state === "CALIBRATE" || state === "CALIBRATE_FAILED" || state === "READY") return "calibrate";
+  if (state === "COUNTDOWN") return mode === "sniper" ? "sniper" : "play";
   if (state === "SNIPER") return "sniper";
   if (PLAYING.includes(state)) return "play";
   if (state === "WIN" || state === "GAME_OVER") return dismissedRound === roundId ? "setup" : "result";
   return "setup";
+}
+
+/** ช่วงของการนับถอยหลัง จากข้อความ COUNTDOWN ที่ได้รับตอน receivedMs
+ * intro = animation (progress 0-1), count = เลข 3-2-1, go = ถึงเวลาเริ่ม */
+export function countdownPhase(message, receivedMs, nowMs) {
+  const left = (message.starts_in_s ?? 0) - (nowMs - receivedMs) / 1000;
+  const count = message.count_s ?? 3;
+  const intro = message.intro_s ?? 0;
+  if (left > count) return { phase: "intro", progress: intro > 0 ? Math.round((1 - (left - count) / intro) * 100) / 100 : 1 };
+  if (left > 0) return { phase: "count", number: Math.ceil(left) };
+  return { phase: "go" };
+}
+
+/** ความยาวรอบสำหรับแถบเวลา: ค่า remaining_s ที่มากที่สุดในรอบ (ต้นรอบ = เวลาเต็ม) อย่างน้อย ROUND_LIMIT_S */
+export function roundLimit(previous, remaining) {
+  return Math.max(previous ?? ROUND_LIMIT_S, isNumber(remaining) ? remaining : 0);
 }
 
 export function partName(part) {
@@ -100,7 +119,7 @@ export class Recorder {
     this.startMs = null;
     this.changes = []; // [{state, ms}]
     this.endMs = null;
-    this.samples = { bpm: [], distance: [], motion: [] };
+    this.samples = { bpm: [], distance: [], motion: [], gyro: [] };
     this.hitsSeen = [];
     this.lastHits = 0;
     this.bpmRest = null;
@@ -121,10 +140,14 @@ export class Recorder {
     if (topic === HEART && isNumber(payload.bpm)) {
       if (this.lastState === "CALIBRATE") this.bpmRest = payload.bpm;
       if (playing) this.samples.bpm.push({ t: this.at(nowMs), v: payload.bpm });
+    } else if (topic === IMU && playing && isNumber(payload.gyro_rms)) {
+      this.samples.gyro.push({ t: this.at(nowMs), v: payload.gyro_rms });
     } else if (topic === DISTANCE && playing && isNumber(payload.distance_cm)) {
       this.samples.distance.push({ t: this.at(nowMs), cm: payload.distance_cm });
-    } else if (topic === VISION && playing && this.lastState === "RED_LIGHT" && isNumber(payload.score_ratio)) {
-      this.samples.motion.push({ t: this.at(nowMs), v: payload.score_ratio });
+    } else if (topic === VISION && playing && this.lastState === "RED_LIGHT") {
+      // การขยับเทียบเกณฑ์: contract ใช้ score_ratio, pi_client.py ส่งชื่อ score
+      const ratio = isNumber(payload.score_ratio) ? payload.score_ratio : payload.score;
+      if (isNumber(ratio)) this.samples.motion.push({ t: this.at(nowMs), v: ratio });
     }
   }
 
@@ -163,6 +186,7 @@ export class Recorder {
       bpm: [...this.samples.bpm],
       distance: [...this.samples.distance],
       motion: [...this.samples.motion],
+      gyro: [...this.samples.gyro],
       hits: [...this.hitsSeen],
       bpm_rest: this.bpmRest,
       result: this.result,
