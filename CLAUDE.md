@@ -39,7 +39,7 @@
 
 | ไฟล์ | ใช้ทำอะไร |
 | :--- | :--- |
-| `esp32/wrist/wrist.ino`, `esp32/finish/finish.ino` | ESP ข้อมือ และ ESP เส้นชัย (ค่า Wi-Fi / IP broker อยู่ใน `secrets.h` ที่ไม่ขึ้น git) |
+| `esp32/wrist/wrist.ino`, `esp32/finish/finish.ino` | ESP ข้อมือ และ ESP เส้นชัย (ค่า Wi-Fi / IP broker อยู่ในส่วน CONFIG บนสุดของไฟล์) |
 | `pi/pi_client.py` | รันบน Pi: กล้อง + MediaPipe → MQTT `rlgl/gateway/vision`, ภาพสด `:8000/stream`, อัดคลิปส่ง backend |
 | `pi/motion_detector.py` | ตัวตรวจการขยับที่ `pi_client.py` ใช้ |
 | `laptop/engine/` | game engine: state ของเกม และตัดสินแพ้ชนะ |
@@ -84,10 +84,10 @@ MediaPipe มี 33 จุด แปลงเหลือ 17 ด้วย `MP_TO
 
 * เอกสาร คอมเมนต์ และข้อความถึงผู้ใช้เป็น**ภาษาไทย** ชื่อตัวแปร ฟังก์ชัน และ topic เป็นภาษาอังกฤษ
 * ข้อความที่วาดบนภาพด้วย `cv2.putText` ต้องเป็นภาษาอังกฤษ (OpenCV แสดงภาษาไทยไม่ได้)
-* IP ของ broker อ่านจาก config ที่เดียว: ESP ใช้ `MQTT_HOST` ใน `esp32/<ชื่อ>/secrets.h`, laptop ใช้ `laptop/infra/.env`
+* IP ของ broker อ่านจาก config ที่เดียว: ESP ใช้ `MQTT_HOST` ในส่วน CONFIG บนสุดของ `.ino`, laptop ใช้ `laptop/infra/.env`
 * MQTT topic ขึ้นต้นด้วย `rlgl/` เสมอ
 * โค้ดบน ESP ห้ามใช้ `delay()` ใน loop หลัก (โดยเฉพาะตอนกะพริบ LED) ใช้ `millis()` เพื่อให้ `client.loop()` ทำงานตลอด
-* อย่า commit ไฟล์โมเดลหรือผลทดสอบ: `*.pt`, `*.task`, `captures/`, `replays/` และ `esp32/**/secrets.h` (อยู่ใน `.gitignore` แล้ว)
+* อย่า commit ไฟล์โมเดลหรือผลทดสอบ: `*.pt`, `*.task`, `captures/`, `replays/` (อยู่ใน `.gitignore` แล้ว) และอย่า commit รหัส Wi-Fi จริงใน `.ino` (ใส่ `YOUR_PASSWORD` ไว้ใน repo)
 
 ## เกณฑ์ที่ยังไม่ผ่าน / งานค้าง
 

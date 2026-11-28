@@ -29,7 +29,7 @@
    ```
 
    ภาพสดอยู่ที่ `http://<IP Pi>:8000/stream` ส่วน `--backend` ใช้ส่งคลิปของรอบให้ laptop
-3. **ESP:** คัดลอก `esp32/secrets.example.h` ไปเป็น `secrets.h` ในโฟลเดอร์ของ sketch แต่ละตัว ใส่ Wi-Fi และ IP ของ Pi แล้วแฟลช
+3. **ESP:** แก้ `WIFI_SSID`, `WIFI_PASS`, `MQTT_HOST` (IP ของ Pi) ในส่วน CONFIG บนสุดของ `esp32/wrist/wrist.ino` และ `esp32/finish/finish.ino` แล้วแฟลช **อย่า commit รหัส Wi-Fi จริง**
 4. **laptop: Docker** (InfluxDB, Telegraf, Grafana) ในโฟลเดอร์ `laptop\infra`:
 
    ```powershell
@@ -45,8 +45,8 @@
 python set_broker_ip.py <IP ใหม่>
 ```
 
-แล้วแก้ `MQTT_HOST` ใน `secrets.h` ของ ESP แต่ละตัว และแฟลชใหม่
+แล้วแก้ `MQTT_HOST` ใน `.ino` ของ ESP แต่ละตัว และแฟลชใหม่
 
 ## ห้าม commit (repo เป็น public)
 
-`laptop/infra/.env`, `esp32/**/secrets.h`, ไฟล์โมเดล (`*.pt`, `*.task`), รูปและคลิปที่มีหน้าคน (`captures/`, `replays/`, `laptop/web/clips/`) และฐานข้อมูลผู้เล่น (`laptop/web/data/`) ทั้งหมดอยู่ใน `.gitignore` แล้ว
+`laptop/infra/.env`, รหัส Wi-Fi จริงใน `.ino` ของ ESP, ไฟล์โมเดล (`*.pt`, `*.task`), รูปและคลิปที่มีหน้าคน (`captures/`, `replays/`, `laptop/web/clips/`) และฐานข้อมูลผู้เล่น (`laptop/web/data/`) ทั้งหมดยกเว้นรหัส Wi-Fi อยู่ใน `.gitignore` แล้ว

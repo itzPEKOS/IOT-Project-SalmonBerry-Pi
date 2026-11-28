@@ -43,7 +43,9 @@
 #include <string.h>
 
 // ===================== CONFIG (แก้ตรงนี้) =====================
-#include "secrets.h"   // WIFI_SSID, WIFI_PASS, MQTT_HOST: คัดลอก esp32/secrets.example.h มาเป็น secrets.h ในโฟลเดอร์นี้
+const char* WIFI_SSID = "YOUR_WIFI_2.4GHz";
+const char* WIFI_PASS = "YOUR_PASSWORD";
+const char* MQTT_HOST = "172.20.10.3";      // IP ของ Pi (broker) ดูบน Pi ด้วย: hostname -I
 const uint16_t MQTT_PORT = 1883;
 const char* DEVICE_ID = "finish-01";
 const char* NTP_SERVER = "pool.ntp.org";    // ถ้า hotspot ไม่มีเน็ต ts จะเป็น null (backend ใช้เวลาตอนรับแทน)

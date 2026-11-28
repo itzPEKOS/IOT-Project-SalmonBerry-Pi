@@ -10,7 +10,7 @@
   - RLGL_STREAM_URL  (ภาพสดจากกล้อง Pi: เปลี่ยนแค่ IP, port และ path คงเดิม)
 แล้วรัน `docker compose up -d` เพื่อให้ Telegraf โหลดค่าใหม่
 
-ที่สคริปต์นี้แก้ให้ไม่ได้: ESP แต่ละตัว (MQTT_HOST ใน esp32/<ชื่อ>/secrets.h) ต้องแก้แล้วแฟลชเอง
+ที่สคริปต์นี้แก้ให้ไม่ได้: ESP แต่ละตัว (MQTT_HOST ใน esp32/<ชื่อ>/<ชื่อ>.ino) ต้องแก้แล้วแฟลชเอง
 """
 import argparse
 import ipaddress
@@ -87,7 +87,7 @@ def main() -> None:
 
     print()
     print("ยังต้องทำเอง:")
-    print(f"  - ESP ทุกตัว: แก้ MQTT_HOST = \"{ip}\" ใน esp32/<ชื่อ>/secrets.h แล้วแฟลชใหม่")
+    print(f"  - ESP ทุกตัว: แก้ MQTT_HOST = \"{ip}\" ใน esp32/<ชื่อ>/<ชื่อ>.ino แล้วแฟลชใหม่")
     print("  - backend เว็บ และ game engine (ถ้ากำลังรันอยู่): รีสตาร์ตเพื่อให้อ่านค่าใหม่")
     print("  - หน้าเว็บ: รีเฟรชเบราว์เซอร์")
 

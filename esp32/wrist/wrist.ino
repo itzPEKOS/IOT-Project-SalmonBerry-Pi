@@ -21,7 +21,9 @@
 #include <math.h>
 
 // ===================== CONFIG (แก้ตรงนี้) =====================
-#include "secrets.h"   // WIFI_SSID, WIFI_PASS, MQTT_HOST: คัดลอก esp32/secrets.example.h มาเป็น secrets.h ในโฟลเดอร์นี้
+const char* WIFI_SSID = "YOUR_WIFI_2.4GHz";
+const char* WIFI_PASS = "YOUR_PASSWORD";
+const char* MQTT_HOST = "192.168.1.50";     // IP ของเครื่องที่รัน Mosquitto (ตอนนี้ = laptop, ทีหลังเปลี่ยนเป็น Pi)
 const uint16_t MQTT_PORT = 1883;
 const char* DEVICE_ID = "wrist-01";
 const char* NTP_SERVER = "pool.ntp.org";    // ถ้า hotspot ไม่มีเน็ต ใส่ IP ของ Pi แทนได้ (ถ้า Pi เปิด NTP server)

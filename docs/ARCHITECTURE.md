@@ -86,7 +86,7 @@ ESP1, ESP2, Pi ──► Mosquitto บนโน้ตบุ๊ก ──► Game
 **วิธีสลับ:** รัน Mosquitto บนโน้ตบุ๊ก (เปิด `listener 1883 0.0.0.0`, `allow_anonymous true`, WebSocket 9001 และเปิด port ใน Windows Firewall) แล้วเปลี่ยน IP ของ broker ใน ESP1, ESP2, สคริปต์บน Pi, Telegraf และ backend ให้ชี้ไปที่โน้ตบุ๊ก ส่วนโค้ด Game Engine ไม่ต้องแก้
 
 **ข้อตกลงในการเขียนโค้ด:** ทุกตัวต้องอ่าน IP ของ broker จาก config ที่เดียว จะได้สลับแผนโดยไม่ต้องแก้โค้ด
-* ESP: `MQTT_HOST` ใน `esp32/<ชื่อ>/secrets.h` (ไม่ขึ้น git)
+* ESP: `const char* MQTT_HOST` ในส่วน CONFIG บนสุดของ `.ino`
 * Pi / โน้ตบุ๊ก: อ่านจาก `config.yaml` หรือ `.env`
 * เว็บ: `RLGL_STREAM_URL` และ `RLGL_MQTT_HOST` ใน `laptop/infra/.env` (แก้ทั้งหมดด้วย `laptop/infra/set_broker_ip.py`)
 * ตั้ง IP โน้ตบุ๊กและ Pi ให้คงที่ (reserve ที่ router) จะได้ไม่ต้องแก้ใหม่ในวันเดโม
